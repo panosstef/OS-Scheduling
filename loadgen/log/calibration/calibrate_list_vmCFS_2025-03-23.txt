@@ -1,0 +1,26 @@
+dur_list = [14, 17, 22, 29, 40, 57, 87, 134, 212, 336, 538, 863, 1392, 2246, 3625, 5857, 9471, 15317]
+fib = [29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46]
+
+Runtime for arg 29 is 15.077097415924072 ms
+Runtime for arg 30 is 17.210493087768555 ms
+Runtime for arg 31 is 21.75713539123535 ms
+Runtime for arg 32 is 28.737499713897705 ms
+Runtime for arg 33 is 39.585533142089844 ms
+Runtime for arg 29 is 14.383678436279297 ms
+Runtime for arg 30 is 17.48361110687256 ms
+Runtime for arg 31 is 22.132344245910645 ms
+Runtime for arg 32 is 28.889548778533936 ms
+Runtime for arg 33 is 39.70108985900879 ms
+Runtime for arg 34 is 57.4591064453125 ms
+Runtime for arg 35 is 87.15821743011475 ms
+Runtime for arg 36 is 133.70723962783813 ms
+Runtime for arg 37 is 211.5315580368042 ms
+Runtime for arg 38 is 335.6649136543274 ms
+Runtime for arg 39 is 538.0146360397339 ms
+Runtime for arg 40 is 863.0742788314819 ms
+Runtime for arg 41 is 1391.510169506073 ms
+Runtime for arg 42 is 2245.762333869934 ms
+Runtime for arg 43 is 3625.3369212150574 ms
+Runtime for arg 44 is 5856.877632141113 ms
+Runtime for arg 45 is 9470.577595233917 ms
+Runtime for arg 46 is 15317.228236198425 ms

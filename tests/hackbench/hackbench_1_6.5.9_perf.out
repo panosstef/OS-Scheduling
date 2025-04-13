@@ -1,0 +1,23 @@
+Running hackbench with --process 1 times...
+Iteration 1: 0.978 s
+Average execution time (process): 0.978 seconds
+Standard deviation (process): 0 seconds
+
+Running hackbench with --threads 1 times...
+Iteration 1: 0.943 s
+Average execution time (threads): 0.943 seconds
+Standard deviation (threads): 0 seconds
+
+ Performance counter stats for './hackbench_one.sh':
+
+              1664      cpu-migrations                                                        
+            560044      sched:sched_switch                                                    
+            538814      sched:sched_wakeup                                                    
+             20020      sched:sched_wakeup_new                                                
+
+       4.490211640 seconds time elapsed
+
+       6.557926000 seconds user
+      39.744466000 seconds sys
+
+
