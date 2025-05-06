@@ -25,10 +25,10 @@ def load_data(file_path):
 
 
 def calculate_timing_metrics(df):
-	df['execution_time'] = df['exit_time'] - df['start_time'] - (df['startup_latency'] / 1e6)
+	df['response_time'] = df['startup_latency'] / 1e6
+	df['execution_time'] = df['exit_time'] - df['start_time']- df['response_time']
 	df['turnaround_time'] = df['exit_time'] - df['start_time']
-	df.rename(columns={'startup_latency': 'response_time'}, inplace=True)
-	df.drop(columns=['start_time', 'exit_time'], inplace=True)
+	df.drop(columns=['startup_latency', 'start_time', 'exit_time'], inplace=True)
 	df.set_index('pid', inplace=True)
 	return df
 
@@ -36,22 +36,23 @@ def calculate_timing_metrics(df):
 def analyze_data(df1, df2):
 
 	cols = ['response_time', 'execution_time', 'turnaround_time']
-	titles_names = ['Response Time', 'Execution Time', 'Turnaround Time']
-	x_labels = ['Response Time (usecs)', 'Execution Time(s)', 'Turnaround Time (s)']
-	for col, title, x_label in zip(cols, titles_names, x_labels):
+
+	for col in cols:
 		plt.figure()
 		for df, label in zip([df1, df2], ['CFS', 'EEVDF']):
 			data = np.sort(df[col].values)
 			cdf = np.arange(1, len(data)+1) / len(data)
 			plt.plot(data, cdf, label=label)
-		plt.title(f'CFD - {title}')
-		plt.xlabel(x_label)
+		plt.title(f'Cumulative Distribution Function - {col}')
+		plt.xlabel(col)
 		plt.ylabel('CDF')
 		plt.legend()
 		plt.grid(True)
 		plt.tight_layout()
-		plt.savefig(f'cdf_{col}.png')  # Save to file
+		plt.savefig(f"cfs_eevdf_{col}.png")
 		plt.close()
+		printr(f"Saved CDF plot for {col} as cfs_eevdf_latencies.png")
+
 
 def main():
 	parser = argparse.ArgumentParser(
@@ -72,9 +73,6 @@ def main():
 	# Calculate additional timing metrics
 	df1 = calculate_timing_metrics(df1)
 	df2 = calculate_timing_metrics(df2)
-	print(df1['execution_time'].describe())
-	print(df2['execution_time'].describe())
-
 
 	# Analyze the data
 	analyze_data(df1, df2)

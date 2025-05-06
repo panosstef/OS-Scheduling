@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import time
 from datetime import date
 import subprocess
@@ -37,10 +38,11 @@ if __name__ == "__main__":
     if not os.path.exists("./log"):
         os.makedirs("./log")
 
-    repeat = 100
-    for i in range(29, 47):
-        loop(i, repeat)
-        
+    for i in range(3, 41):
+        loop(i, 100)
+
+    for i in range(40, 47):
+        loop(i, 20)
 
     with open(f"./log/calibrate_list_{socket.gethostname()}_{date.today()}.txt", "w") as f:
         f.write("dur_list = {}\n".format(dur_list))

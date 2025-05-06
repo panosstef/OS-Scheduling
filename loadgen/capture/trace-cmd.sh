@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Initialize variables
 OUTPUT_FILE=""
 POSITIONAL_ARGS=()
@@ -35,10 +37,10 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Generate unique trace filename if not specified
+# Throw an error if not output file is specified if not specified
 if [ -z "$OUTPUT_FILE" ]; then
-    EXEC_NAME=$(basename "$1")
-    OUTPUT_FILE="trace_${EXEC_NAME}_$(date +%Y%m%d_%H%M%S).dat"
+    echo "No output file specified. Exiting..."
+    exit 1
 fi
 
 #Comprehensive scheduling events to trace
@@ -50,8 +52,8 @@ SCHED_EVENTS=(
     # sched:sched_process_free
     # sched:sched_migrate_task
     sched:sched_switch
-    sched:sched_wakeup_new
-    sched:sched_wakeup
+    # sched:sched_wakeup_new
+    # sched:sched_wakeup
     # sched:sched_wait_task
     #syscalls:sys_exit_execve
     #syscalls:sys_enter_execve
@@ -82,4 +84,4 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 echo "Trace saved to: $OUTPUT_FILE"
-echo "To get the report use: trace-cmd report -R -t -w --ts-check > trace.txt"
+#echo "To get the report use: trace-cmd report -R -t -w --ts-check > trace.txt"
