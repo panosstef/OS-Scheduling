@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 import time
 import argparse
-import asyncio
+import subprocess
+import threading
 import os
 from utils.exec_utils import set_affinities, log_tasks_output, log_total_time
 from utils.cpu_monitoring import start_cpu_monitoring, stop_cpu_monitoring
@@ -10,70 +11,61 @@ from colorama import Fore, Style
 script_dir = os.path.dirname(os.path.realpath(__file__))
 workload_file = os.path.join(script_dir, "dataset/workload_dur.txt")
 
-# Runner
-async def launch_command_cpp(arg, child_cpus):
-	command = f"taskset -c {child_cpus} {script_dir}/payload/launch_function.out {arg}"
+# Task launcher using Popen
+def launch_command_cpp(arg, results, index):
+	command = f"{script_dir}/payload/launch_function.out {arg}"
 	try:
-		process = await asyncio.create_subprocess_shell(command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-		stdout, stderr = await process.communicate()
+		process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		stdout, stderr = process.communicate()
 
 		if process.returncode != 0:
-			print(
-				f"Process for arg {arg} exited with code {process.returncode}")
+			print(f"Process for arg {arg} exited with code {process.returncode}")
 			if stderr:
 				print(f"Error: {stderr.decode().strip()}")
 
-		return stdout.decode().strip()
+		results[index] = stdout.decode().strip()
 	except Exception as e:
 		print(f"Exception in task for arg {arg}: {str(e)}")
-		raise
+		results[index] = None
 
-# Launch the C++ fibonacci function according to the trace file IAT
-async def main(outputfile, main_cpu, child_cpus):
+def main(outputfile, cpu_log = False):
+	# set_affinities(main_cpu, child_cpus)
+	if cpu_log:
+		start_cpu_monitoring()
 
-	set_affinities(main_cpu, child_cpus)
+	threads = []
+	results = []
 
-	start_cpu_monitoring(main_cpu, child_cpus)
-
-	# Read trace file
-	tasks = set()
-	# Debug values to test IAT
-	#time_fired = []
-	#iat_values = []  # Store the original IAT values from the file
-	start_simulation = time.time()
 	with open(workload_file, "r") as f:
 		lines = f.readlines()
-		for line in lines:
-			IAT = float(line.split(" ")[0])
-			arg = int(line.split(" ")[1])  # arg is fibonacci N
-			await asyncio.sleep(IAT)  # sleep for IAT seconds
-			#iat_values.append((IAT, arg))  # Store the original IAT value
-			#time_fired.append((time.time(), arg))
-			task = asyncio.create_task(launch_command_cpp(arg, child_cpus))
-			tasks.add(task)
 
-	task_results = await asyncio.gather(*tasks)
+	start_simulation = time.time()
+
+	for i, line in enumerate(lines):
+		IAT = float(line.split(" ")[0])
+		arg = int(line.split(" ")[1])
+
+		time.sleep(IAT)
+
+		results.append(None)  # Placeholder for thread result
+		t = threading.Thread(target=launch_command_cpp, args=(arg, results, i))
+		t.start()
+		threads.append(t)
+
+	for t in threads:
+		t.join()
+
 	end_simulation = time.time()
 
 	print(f"{Fore.GREEN}Time elapsed: {end_simulation - start_simulation:.2f} s{Style.RESET_ALL}")
 
 	stop_cpu_monitoring(outputfile, start_simulation, end_simulation)
-
-	await log_tasks_output(task_results, outputfile)
-
-	# Uncomment the following line to debug IAT
-	#debug_iat(time_fired, iat_values, start_simulation, outputfile)
-
+	log_tasks_output(results, outputfile)
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--outputfile", type=str, help="Output file name")
-	parser.add_argument("--main-cpu", type=int, default=0,
-						help="CPU core for main process")
-	parser.add_argument("--child-cpus", type=str, default="1-23",
-						help="Comma-separated list of CPU cores for child processes")
-
+	parser.add_argument("--cpu_log", action="store_true", help="Enable CPU log", default=False)
 	args = parser.parse_args()
 
-
-	asyncio.run(main(args.outputfile, args.main_cpu, args.child_cpus))
+	main(args.outputfile, args.cpu_log)

@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import argparse
 import sys
+import os
+
 from colorama import Fore, Style
 
 
@@ -18,40 +20,47 @@ def printr(*args, color=Fore.RED, **kwargs):
 def load_data(file_path):
 	try:
 		data = pd.read_csv(file_path)
-		return data
+		return data, os.path.basename(file_path)
 	except Exception as e:
-		printr(f"Error loading {file_path}: {e}")
-		return None
+		print(f"Error loading {file_path}: {e}")
+		return None, os.path.basename(file_path)
 
 
 def calculate_timing_metrics(df):
-	df['response_time'] = df['startup_latency'] / 1e6
+	df.rename(columns={"startup_latency": "response_time"}, inplace=True)
 	df['execution_time'] = df['exit_time'] - df['start_time']- df['response_time']
 	df['turnaround_time'] = df['exit_time'] - df['start_time']
-	df.drop(columns=['startup_latency', 'start_time', 'exit_time'], inplace=True)
+	df.drop(columns=['start_time', 'exit_time', 'arg'], inplace=True)
 	df.set_index('pid', inplace=True)
 	return df
 
 
-def analyze_data(df1, df2):
-
+def analyze_data(d1, d2):
 	cols = ['response_time', 'execution_time', 'turnaround_time']
+	# Convert duration list to seconds
+	dur_list_ms = [7, 8, 9, 10, 12, 14, 17, 21, 27, 39, 56, 85, 131, 205, 325, 520, 838, 839, 1347, 2175, 3512, 5673, 9172]
+	dur_list_sec = [x / 1000 for x in dur_list_ms]
 
 	for col in cols:
-		plt.figure()
-		for df, label in zip([df1, df2], ['CFS', 'EEVDF']):
+		plt.figure(figsize=(15, 10), dpi=300)
+		for (df, label) in [d1, d2]:
 			data = np.sort(df[col].values)
 			cdf = np.arange(1, len(data)+1) / len(data)
 			plt.plot(data, cdf, label=label)
 		plt.title(f'Cumulative Distribution Function - {col}')
-		plt.xlabel(col)
+		plt.xlabel(f"{col}	(s)")
 		plt.ylabel('CDF')
 		plt.legend()
 		plt.grid(True)
+
+		if col == 'turnaround_time (s)' or col == 'execution_time (s)':
+			for x in dur_list_sec:
+				plt.axvline(x=x, color='gray', linestyle='--', linewidth=0.8)
+
 		plt.tight_layout()
-		plt.savefig(f"cfs_eevdf_{col}.png")
+		plt.savefig(f"CDF_{col}.png")
 		plt.close()
-		printr(f"Saved CDF plot for {col} as cfs_eevdf_latencies.png")
+		printr(f"Saved CDF plot for {col} as CDF_{col}.png")
 
 
 def main():
@@ -62,8 +71,8 @@ def main():
 	args = parser.parse_args()
 	pd.set_option('display.float_format', '{:.10f}'.format)
 
-	df1 = load_data(args.file1)
-	df2 = load_data(args.file2)
+	(df1, name1) = load_data(args.file1)
+	(df2, name2) = load_data(args.file2)
 
 	# Check if data was loaded successfully
 	if df1 is None or df2 is None:
@@ -75,7 +84,7 @@ def main():
 	df2 = calculate_timing_metrics(df2)
 
 	# Analyze the data
-	analyze_data(df1, df2)
+	analyze_data((df1, name1), (df2, name2))
 
 
 

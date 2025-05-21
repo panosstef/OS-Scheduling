@@ -32,7 +32,7 @@ def parse_event_from_line(line):
 	trace_pattern = re.compile(
 		r'(.+?)-(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+(\S+):\s+(.*)')
 
-	match = trace_pattern.match(line.strip())
+	match = trace_pattern.match(line)
 	if match:
 		process, pid, cpu, timestamp, event_type, details_str = match.groups()
 
@@ -70,22 +70,22 @@ def parse_ftrace(file_path, pids: set):
 			# Create progress bar
 			with tqdm(total=file_size, unit='B', unit_scale=True,
 					  desc="Parsing trace", bar_format='{l_bar}{bar:30}{r_bar}') as pbar:
-				pbar.update(f.tell())
 
-				for line in f:
-					if line.startswith("#") or line.startswith("Minimum") or line.startswith("Maximum"):
-						continue
-					# Update progress bar based on line length
-					pbar.update(len(line))
+				for raw_line in f:
+					pbar.update(len(raw_line))
+					line = raw_line.strip()
 
 					for pid_str in pids_str:
 						if pid_str in line:
 							event = parse_event_from_line(line)
 							# Border case where the pid is part of the digits in timestamp
-							# if pid_str not in {str(event.pid), str(event.details)}:
-							# continue
-							# else:
-							workload_events_dict[int(pid_str)].append(event)
+							if pid_str not in str(event.pid) and pid_str not in str(event.details):
+								continue
+							else:
+								workload_events_dict[int(
+									pid_str)].append(event)
+
+							# Check if the event is sched_process_exit, if so remove the pid from the set
 							if event.event_type == "sched_process_exit" and f"pid={pid_str}" in event.details:
 								# Remove PID from set once found
 								pids_str.remove(pid_str)
@@ -124,9 +124,9 @@ def pids_ftoset(pid_file):
 	try:
 		with open(pid_file, 'r') as f:
 			for line in f:
-				line = line.strip()
-				if line and line.isdigit():
-					pids.add(int(line))
+				pid, arg = line.strip().split()
+				if pid and arg and pid.isdigit() and arg.isdigit():
+					pids.add((int(arg), int(pid)))
 				else:
 					raise ValueError(
 						f"{Fore.RED}{Style.BRIGHT}Invalid line in PID file: {line}{Style.RESET_ALL}")
@@ -138,7 +138,7 @@ def pids_ftoset(pid_file):
 	return pids
 
 
-def get_workload_times(workload_events):
+def get_workload_times(workload_events, pids_wargs):
 	print(f"{Fore.GREEN}{Style.BRIGHT}Getting workload times{Style.RESET_ALL}")
 	workload_times = {}
 
@@ -148,26 +148,19 @@ def get_workload_times(workload_events):
 			first_scheduled_time = None
 			exit_time = None
 
-			start_time = next(
-				(event.timestamp for event in events
-				 if event.event_type == "sched_process_fork"
-				 and f"child_pid={pid}" in event.details),
-				None
-			)
+			for event in events:
+				if start_time is None and event.event_type == "sched_process_fork" and f"child_pid={pid}" in event.details:
+					start_time = event.timestamp
+					continue
 
-			exit_time = next(
-				(event.timestamp for event in events
-				 if event.event_type == "sched_process_exit"
-				 and f"pid={pid}" in event.details),
-				None
-			)
+				if (start_time is not None and first_scheduled_time is None and
+						event.event_type == "sched_switch" and f"next_pid={pid}" in event.details):
+					first_scheduled_time = event.timestamp
+					continue
 
-			first_scheduled_time = next(
-				(event.timestamp for event in events
-				 if event.event_type == "sched_switch"
-				 and f"next_pid={pid}" in event.details),
-				None
-			)
+				if first_scheduled_time is not None and event.event_type == "sched_process_exit" and f"pid={pid}" in event.details:
+					exit_time = event.timestamp
+					break
 
 			startup_latency = first_scheduled_time - start_time
 
@@ -184,7 +177,15 @@ def get_workload_times(workload_events):
 					f"{Fore.RED}{Style.BRIGHT}Error: Invalid times for PID {pid}: {start_time} {startup_latency} {exit_time}{Style.RESET_ALL}")
 				exit(-1)
 
-			workload_times[pid] = {
+			#Find the arguments of the workload
+			arg = next(
+				(arg for arg, pid_arg in pids_wargs if pid_arg == pid), None)
+			if arg is None:
+				print(
+					f"{Fore.RED}{Style.BRIGHT}Error: PID {pid} not found in the workload arguments{Style.RESET_ALL}")
+				exit(-1)
+
+			workload_times[(arg, pid)] = {
 				"start_time": start_time,
 				"startup_latency": startup_latency,
 				"exit_time": exit_time
@@ -221,27 +222,28 @@ def workload_times_out(workload_times, output_file):
 
 	# Convert dictionary to DataFrame
 	data = []
-	for pid, times in workload_times.items():
-		row = {'pid': pid}
+	for (arg, pid), times in workload_times.items():
+		row = {'pid': pid, 'arg': arg}
 		row.update(times)
 		data.append(row)
 
 	df = pd.DataFrame(data)
 
-	# Now you can save to CSV
-	df.to_csv(f"{cwd}/../log/per_proc_times/workload_times_{output_file}.csv", index=False)
-	print(f"{Fore.CYAN}{Style.BRIGHT}	Workload times written to: workload_times.csv{Style.RESET_ALL}")
+	df.to_csv(
+		f"{cwd}/../log/per_proc_times/workload_times_{output_file}.csv", index=False)
+	print(f"{Fore.CYAN}{Style.BRIGHT}	Workload times written to: workload_times_{output_file}.csv{Style.RESET_ALL}")
 
 
 def main():
 	if len(sys.argv) != 4:
-		print("Usage: python parse_trace.py <ftrace_file> <pid_file>")
+		print("Usage: python parse_trace.py <ftrace_file> <pid_file> <output_file>")
 		sys.exit(1)
 	file_path = sys.argv[1]
 	pid_file = sys.argv[2]
 	output_file = sys.argv[3]
 
-	pids: set = pids_ftoset(pid_file)
+	pids_wargs = pids_ftoset(pid_file)
+	pids: set = {pid for _, pid in pids_wargs}
 
 	workload_events = parse_ftrace(file_path, pids)
 	if not workload_events:
@@ -253,10 +255,10 @@ def main():
 	check_all_pids(workload_events.keys(), pids)
 
 	# Print the workload events to a file
-	# workload_events_out(workload_events)
+	#workload_events_out(workload_events)
 
 	# Get times for each pid, each pid has a startup_latency and total_time
-	workload_times = get_workload_times(workload_events)
+	workload_times = get_workload_times(workload_events, pids_wargs)
 
 	# Output to csv the times
 	workload_times_out(workload_times, output_file)
