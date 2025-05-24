@@ -1,6 +1,9 @@
 loadgen/.vscode/launch.json
-*.csv
 *.pyc
 workload_event*.out
 loadgen/capture/capture_data/
 loadgen/payload/launch_function.out
+workload_events.out
+loadgen/runners/tmp
+loadgen/dataset/trace
+*/__pycache__/

@@ -230,7 +230,7 @@ def workload_times_out(workload_times, output_file):
 	df = pd.DataFrame(data)
 
 	df.to_csv(
-		f"{cwd}/../log/per_proc_times/workload_times_{output_file}.csv", index=False)
+		f"{os.getcwd()}/tmp/workload_times_{output_file}.csv", index=False)
 	print(f"{Fore.CYAN}{Style.BRIGHT}	Workload times written to: workload_times_{output_file}.csv{Style.RESET_ALL}")
 
 
@@ -255,7 +255,7 @@ def main():
 	check_all_pids(workload_events.keys(), pids)
 
 	# Print the workload events to a file
-	#workload_events_out(workload_events)
+	workload_events_out(workload_events)
 
 	# Get times for each pid, each pid has a startup_latency and total_time
 	workload_times = get_workload_times(workload_events, pids_wargs)

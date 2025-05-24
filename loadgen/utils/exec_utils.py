@@ -32,11 +32,6 @@ def debug_iat(time_fired, iat_values, start_simulation, outputfile):
 					f"{interarrival_times[i][1]}: {(interarrival_times[i][0] - iat_values[i][0])/iat_values[i][0]}%\n")
 
 def log_tasks_output(task_results, outputfile):
-	# Create a directory for the tasks pids if it doesn't exist
-	log_dir_pids = f"{script_dir}/tmp"
-	os.makedirs(log_dir_pids, exist_ok=True)
-	log_file_pids = f"{log_dir_pids}/{outputfile}_pids.txt"
-
 	# Extract PID and argument from each output line
 	lines = []
 	for output in task_results:
@@ -46,12 +41,10 @@ def log_tasks_output(task_results, outputfile):
 		lines.append(f"{pid} {arg}")
 
 	# Write to file
-	with open(log_file_pids, "w") as f:
+	with open(f"{outputfile}_pids.txt", "w") as f:
 		f.write("\n".join(lines) + "\n")
-	print(f"{Fore.CYAN}Run {len(lines)} tasks. Pids saved in {log_file_pids}{Style.RESET_ALL}")
+	print(f"{Fore.CYAN}Run {len(lines)} tasks. Pids saved in {outputfile}_pids.txt{Style.RESET_ALL}")
 
-
-def log_total_time(start_simulation, end_simulation, outputfile):
-	with open(f"{log_dir}/total_time.txt", "a") as f:
-			f.write(f"{outputfile}: {end_simulation - start_simulation:.2f} s\n")
-
+def log_total_time(outputfile, total_time):
+	with open(f"{os.getcwd()}/gen_stats.txt", "a") as f:
+			f.write(f"{outputfile}: {total_time:.2f} s\n")

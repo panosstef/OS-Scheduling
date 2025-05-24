@@ -28,7 +28,7 @@ def launch_command_cpp(arg, results, index):
 		print(f"Exception in task for arg {arg}: {str(e)}")
 		results[index] = None
 
-def main(outputfile, cpu_log = False):
+def main(outputfile, cpu_log = False, time_log = False):
 	# set_affinities(main_cpu, child_cpus)
 	if cpu_log:
 		start_cpu_monitoring()
@@ -58,6 +58,8 @@ def main(outputfile, cpu_log = False):
 	end_simulation = time.time()
 
 	print(f"{Fore.GREEN}Time elapsed: {end_simulation - start_simulation:.2f} s{Style.RESET_ALL}")
+	if time_log:
+		log_total_time(outputfile, end_simulation - start_simulation)
 
 	stop_cpu_monitoring(outputfile, start_simulation, end_simulation)
 	log_tasks_output(results, outputfile)
@@ -65,7 +67,8 @@ def main(outputfile, cpu_log = False):
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--outputfile", type=str, help="Output file name")
+	parser.add_argument("--time_log", action="store_true", help="Enable time log", default=False)
 	parser.add_argument("--cpu_log", action="store_true", help="Enable CPU log", default=False)
 	args = parser.parse_args()
 
-	main(args.outputfile, args.cpu_log)
+	main(args.outputfile, args.cpu_log, args.time_log)

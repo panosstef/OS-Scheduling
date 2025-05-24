@@ -1,9 +1,7 @@
 import psutil
 import threading
 import time
-import os
 import pandas as pd
-from utils.exec_utils import log_dir
 
 monitor_running = False
 monitor_thread = None
@@ -54,5 +52,4 @@ def output_cpu_utilization(outputfile, cpu_data):
 		[f"cpu_{i}" for i in range(len(cpu_data[0][1]))]
 	)
 
-	os.makedirs(f"{log_dir}/cpu_util", exist_ok=True)
-	df.to_csv(f"{log_dir}/cpu_util/{outputfile}", index=False, mode='a')
+	df.to_csv(f"{outputfile}_cpu_util.csv", index=False, mode='a')

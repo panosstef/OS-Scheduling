@@ -8,7 +8,7 @@ from colorama import Fore, Style
 cwd = os.path.dirname(os.path.realpath(__file__))
 
 
-def parse_latency_data(text):
+def parse_latency_data(text, pid_arg_map: dict):
 	lines = text.strip().split('\n')
 
 	data_lines = [
@@ -43,6 +43,7 @@ def parse_latency_data(text):
 
 	df = pd.DataFrame({
 		'Task': tasks,
+		'Pid': [task.split(':')[-1] for task in tasks],
 		'Runtime_ms': runtimes,
 		'Switches': switches,
 		'Avg_delay_ms': avg_delays,
@@ -51,14 +52,26 @@ def parse_latency_data(text):
 		'Max_delay_end_s': max_delay_ends
 	})
 
-	# df = df[df['Task'].str.startswith("launch_function")]
+	# Keep only matching PIDs and add arguments
+	df['Pid'] = df['Pid'].astype(int)  # Ensure correct dtype
+	df = df[df['Pid'].isin(pid_arg_map)]  # Filter
+	df['Arg'] = df['Pid'].map(pid_arg_map)  # Add Arg
 
-	return df
+	return df[['Task', 'Pid', 'Arg', 'Runtime_ms', 'Switches', 'Avg_delay_ms', 'Max_delay_ms', 'Max_delay_start_s', 'Max_delay_end_s']]
 
+def get_pid_arg_map(pids_file):
+	pid_arg_map = {}
+	with open(pids_file, 'r') as f:
+		for line in f:
+			pid, arg = line.strip().split(" ", 1)
+			if pid.isdigit():
+				pid_arg_map[int(pid)] = arg
+	return pid_arg_map
 
 def main():
 	parser = argparse.ArgumentParser(description="Parse perf sched latency output")
 	parser.add_argument('latencies_file', type=str, help='latency file contaning perf sched latency data')
+	parser.add_argument('pids_file', type=str, help='pids file containing the pids to filter')
 	parser.add_argument('output_file', type=str, help='output file')
 	args = parser.parse_args()
 
@@ -67,9 +80,9 @@ def main():
 
 	df = pd.DataFrame()
 	with open(args.latencies_file, 'r') as f:
-		df = parse_latency_data(f.read())
+		df = parse_latency_data(f.read(), get_pid_arg_map(args.pids_file))
 		df.to_csv(output_path, index=False)
-	print(f"{Fore.CYAN}{Style.BRIGHT}	Workload latencies written to: {output_path}{Style.RESET_ALL}")
+	print(f"{Fore.CYAN}	Workload latencies written to: {output_path}{Style.RESET_ALL}")
 
 
 if __name__ == '__main__':

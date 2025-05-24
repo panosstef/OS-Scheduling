@@ -1,32 +1,24 @@
 #!/bin/bash
-
+[ "$EUID" -ne 0 ] && exec sudo "$0" "$@"
 set -e
 
-exit_function() {
-	trap - EXIT ERR
-	rm -rf "$SCRIPT_DIR/tmp" 2>/dev/null
-	kill 0 2>/dev/null
-
-}
-trap exit_function EXIT ERR SIGINT
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTNAME="$(hostname)"
 HOSTNAME="${HOSTNAME:2}"
 DATE="$(date +%d-%m-%Y_%H:%M)"
-FILENAME="${HOSTNAME}_${DATE}"
+DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
-#Change open fd limit
-ulimit -n 16384
+#Sync the shared folder to the home directory (not doing so makes perf record lose samples)
+echo -e "Syncing shared folder to home directory\n"
+rsync -av --delete /shared/loadgen ~/
+cd ~/loadgen/runners
 
-#Run the script with tracing
-mkdir -p "$SCRIPT_DIR/tmp"
+#Run the ftrace experiment and perf experiment
+echo -e "\nRunning ftrace experiment\n"
+./run_experiment_ftrace.sh $DEFAULT_FILENAME
 
-#Run the script with tracing
-./capture/trace-cmd.sh --output "$SCRIPT_DIR/tmp/$FILENAME.dat" ./exec_workload.py --outputfile $FILENAME
+echo -e "\nRunning perf experiment\n"
+./run_experiment_perf.sh $DEFAULT_FILENAME
 
-#Analyze the trace file
-trace-cmd report -R -t -w --ts-check -i "$SCRIPT_DIR/tmp/$FILENAME.dat" > "$SCRIPT_DIR/tmp/$FILENAME.txt"
-
-#Parse the results
-analyze/parse_trace.py "$SCRIPT_DIR/tmp/$FILENAME.txt" "$SCRIPT_DIR/tmp/${FILENAME}_pids.txt" "$FILENAME"
+#Sync the results back to the shared folder
+echo -e "\nSyncing results back to shared folder"
+sudo rsync -av --no-owner --no-group ~/loadgen/log /shared/loadgen/

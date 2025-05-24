@@ -8,38 +8,40 @@ from colorama import Fore, Style
 cwd = os.path.dirname(os.path.realpath(__file__))
 
 
-def parse_timehist_data(text):
-	data_lines = text.strip().split('\n')[2:]
+def parse_timehist_avg_data(text):
+	data_lines = text.strip().split('\n')[4:]
 
-	times = []
-	cpus = []
-	tasks = []
+	comms = []
 	pids = []
-	wait_times = []
-	sch_delays = []
-	run_times = []
+	sched_ins = []
+	min_runs = []
+	avg_runs = []
+	max_runs = []
+	migrations = []
 
-	pattern = re.compile(r'\s*(\d+\.\d+)\s+\[(\d+)\]\s+(\S+)\[(\d+)\]\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)')
+	pattern = re.compile(
+		r'\s*(\w+)\[(\d+)\]\s+(\d+)\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)'
+	)
 
 	for line in data_lines:
 		match = pattern.search(line)
-		if match:
-			times.append(float(match.group(1)))
-			cpus.append(int(match.group(2)))
-			tasks.append(match.group(3))
-			pids.append(int(match.group(4)))
-			wait_times.append(float(match.group(5)))
-			sch_delays.append(float(match.group(6)))
-			run_times.append(float(match.group(7)))
+		if match and match.group(1) == 'launch_function':
+			comms.append(match.group(1))
+			pids.append(int(match.group(2)))
+			sched_ins.append(int(match.group(4)))
+			min_runs.append(float(match.group(6)))
+			avg_runs.append(float(match.group(7)))
+			max_runs.append(float(match.group(8)))
+			migrations.append(int(match.group(10)))
 
 	df = pd.DataFrame({
-		'Time': times,
-		'CPU': cpus,
-		'Task': tasks,
-		'PID': pids,
-		'Wait_time_ms': wait_times,
-		'Sched_delay_ms': sch_delays,
-		'Run_time_ms': run_times,
+		'comm': comms,
+		'pid': pids,
+		'sched_in_count': sched_ins,
+		'min_run_ms': min_runs,
+		'avg_run_ms': avg_runs,
+		'max_run_ms': max_runs,
+		'migrations': migrations
 	})
 
 	return df
@@ -55,7 +57,7 @@ def main():
 
 	df = pd.DataFrame()
 	with open(args.timehist_file, 'r') as f:
-		df = parse_timehist_data(f.read())
+		df = parse_timehist_avg_data(f.read())
 		df.to_csv(output_path, index=False)
 	print(f"{Fore.CYAN}	Workload sched latencies written to: {output_path}{Style.RESET_ALL}")
 
