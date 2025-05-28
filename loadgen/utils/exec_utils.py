@@ -1,5 +1,6 @@
 import psutil
 import os
+import subprocess
 import __main__
 from colorama import Fore, Style
 
@@ -7,11 +8,21 @@ script_dir = os.path.dirname(os.path.realpath(__main__.__file__))
 log_dir = os.path.join(script_dir, "log")
 os.makedirs(log_dir, exist_ok=True)
 
-def set_affinities(main_cpu, child_cpus):
-	p = psutil.Process()
-	p.cpu_affinity([main_cpu])
-	print(f"Main process pinned to CPU {main_cpu}")
-	print(f"Child processes will be pinned to CPUs: {child_cpus}")
+
+def add_to_cgroup():
+	cgroup_procs_path = "/sys/fs/cgroup/loadgen/orchestrator/cgroup.procs"
+	try:
+		with open(cgroup_procs_path, "w") as f:
+			f.write(str(os.getpid()))
+	except FileNotFoundError:
+		subprocess.run([f"{script_dir}/cpu_isolation/setup_cpu_isolation.sh"], check=True)
+
+def set_ulimit():
+	try:
+		psutil.Process(os.getpid()).rlimit(psutil.RLIMIT_NOFILE, (65536, 65536))
+	except psutil.Error as e:
+		print(f"{Fore.RED}Failed to set ulimit: {e}{Style.RESET_ALL}")
+		exit(-1)
 
 def debug_iat(time_fired, iat_values, start_simulation, outputfile):
 	# Calculate IAT
@@ -22,14 +33,22 @@ def debug_iat(time_fired, iat_values, start_simulation, outputfile):
 		interarrival_times.append(
 			(time_fired[i][0] - time_fired[i-1][0], time_fired[i][1]))
 
-	# Get % difference between workload IAT and actual IAT
-	with open(f"{log_dir}/{outputfile}_IAT_diff.txt", "w") as f:
+	# Output the actual IAT times
+	with open(f"{outputfile}_IAT.txt", "w") as f:
 		for i in range(0, len(interarrival_times)):
-			if iat_values[i][0] == 0:
-				continue
+			f.write(
+				f"{interarrival_times[i][1]}: {interarrival_times[i][0]}\n")
+
+	# Get % difference between workload IAT and actual IAT
+	with open(f"{outputfile}_IAT_diff.txt", "w") as f:
+		for i in range(0, len(interarrival_times)):
+			if iat_values[i] == 0:
+				f.write(
+					f"{interarrival_times[i][1]}: {interarrival_times[i][0]} (should be 0)\n")
 			else:
 				f.write(
-					f"{interarrival_times[i][1]}: {(interarrival_times[i][0] - iat_values[i][0])/iat_values[i][0]}%\n")
+					f"{interarrival_times[i][1]}: {(interarrival_times[i][0] - iat_values[i])/iat_values[i]}%\n")
+
 
 def log_tasks_output(task_results, outputfile):
 	# Extract PID and argument from each output line
@@ -45,6 +64,7 @@ def log_tasks_output(task_results, outputfile):
 		f.write("\n".join(lines) + "\n")
 	print(f"{Fore.CYAN}Run {len(lines)} tasks. Pids saved in {outputfile}_pids.txt{Style.RESET_ALL}")
 
+
 def log_total_time(outputfile, total_time):
 	with open(f"{os.getcwd()}/gen_stats.txt", "a") as f:
-			f.write(f"{outputfile}: {total_time:.2f} s\n")
+		f.write(f"{outputfile}: {total_time:.2f} s\n")

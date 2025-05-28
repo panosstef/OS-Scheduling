@@ -58,7 +58,7 @@ def parse_ftrace(file_path, pids: set):
 	print(f"{Fore.GREEN}{Style.BRIGHT}Parsing ftrace file: {file_path}{Style.RESET_ALL}")
 
 	workload_events_dict = defaultdict(list)
-	pids_str = {str(pid) for pid in pids}  # Convert all PIDs to strings once
+	pids_str = set({str(pid) for pid in pids} ) # Convert all PIDs to strings once and make it a set for faster lookups
 
 	try:
 		file_size = os.path.getsize(file_path)
@@ -74,6 +74,7 @@ def parse_ftrace(file_path, pids: set):
 				for raw_line in f:
 					pbar.update(len(raw_line))
 					line = raw_line.strip()
+					pids_to_remove = set()
 
 					for pid_str in pids_str:
 						if pid_str in line:
@@ -87,9 +88,11 @@ def parse_ftrace(file_path, pids: set):
 
 							# Check if the event is sched_process_exit, if so remove the pid from the set
 							if event.event_type == "sched_process_exit" and f"pid={pid_str}" in event.details:
-								# Remove PID from set once found
-								pids_str.remove(pid_str)
+								pids_to_remove.add(pid_str)
 								break
+
+					#Remove them not not to fuck up array iteration in python (known bug)
+					pids_str -=  pids_to_remove
 
 	except Exception as e:
 		print(f"{Fore.RED}	Error parsing trace file: {e}{Style.RESET_ALL}")

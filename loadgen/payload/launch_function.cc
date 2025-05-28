@@ -11,19 +11,14 @@ unsigned long long fibonacci(int n) {
 
 int main(int argc, char *argv[]) {
 
-    // get the pid of the current process
+    // Add the process to a cgroup for workload management
     std::string pid = std::to_string(getpid());
-    // Add the process to enclave_1
-    // std::string command = "echo " + pid + " > /sys/fs/ghost/enclave_1/tasks";
-
-    // int ret = std::system(command.c_str());
-    // if (ret == 0) {
-    //     // if successful, print the command
-    //     std::cout << command << std::endl;
-    // } else {
-    //     // if failed, print the error message
-    //     std::cout << "Failed to add to enclave_1" << std::endl;
-    // }
+    std::string command = "echo " + pid + " > /sys/fs/cgroup/loadgen/workload/cgroup.procs";
+    int ret = std::system(command.c_str());
+    if (ret != 0) {
+        std::cout << "Failed to add to workload cgroup" << std::endl;
+        return -1;
+    }
 
     int arg = atoi(argv[1]);
     unsigned long long n = fibonacci(arg);

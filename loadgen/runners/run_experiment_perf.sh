@@ -16,16 +16,13 @@ DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
 FILENAME="${1:-$DEFAULT_FILENAME}"
 
-#Change open fd limit
-ulimit -n 16384
-
 #Run the script with tracing
 rm -rf "$SCRIPT_DIR/tmp" 2>/dev/null
 mkdir -p "$SCRIPT_DIR/tmp"
 cd "$SCRIPT_DIR/tmp"
 
 #Run the script with tracing and move data perf.data
-echo "Running perf sched record"
+echo "Running perf experiment with filename: $FILENAME"
 perf sched record ../../exec_workload.py --outputfile "$SCRIPT_DIR/tmp/$FILENAME" --time_log
 
 pids=$(awk '{print $1}' $FILENAME\_pids.txt | paste -sd,)

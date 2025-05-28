@@ -16,14 +16,12 @@ DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
 FILENAME="${1:-$DEFAULT_FILENAME}"
 
-#Change open fd limit
-ulimit -n 16384
-
 #Run the script with tracing
 rm -rf "$SCRIPT_DIR/tmp" 2>/dev/null
 mkdir -p "$SCRIPT_DIR/tmp"
 
 #Run the script with tracing
+echo -e "\nRunning ftrace experiment with filename: $FILENAME"
 ../capture/trace-cmd.sh --output "$SCRIPT_DIR/tmp/$FILENAME.dat" ../exec_workload.py --outputfile "$SCRIPT_DIR/tmp/$FILENAME" --cpu_log
 
 #Analyze the trace file
