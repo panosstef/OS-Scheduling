@@ -29,10 +29,10 @@ def load_data(file_path):
 def analyze_latency_data(*datasets):
 	cols = [('Wait_time_ms', 'Wait Time', 'Wait Time (ms)', 'log', 'linear'),
 		 ('Sched_delay_ms', 'Scheduling Delay', 'Scheduling Delay (ms)', 'linear', 'logit'),
-		 ('Run_time_ms', 'Burst CPU Run Time', 'Run Time (ms)', 'log', 'linear')]
+		 ('Run_time_ms', 'Run Time', 'Run Time (ms)', 'log', 'linear')]
 
 	# Create subplots for all CDFs
-	fig, axes = plt.subplots(1, 3, figsize=(35, 15), dpi=300)
+	fig, axes = plt.subplots(1, 3, figsize=(20, 6), dpi=300)
 
 	for i, (col, name, xlabel, xscale, yscale) in enumerate(cols):
 		ax = axes[i]

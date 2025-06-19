@@ -41,6 +41,8 @@ def main():
 	if 'comm' in cols:
 		cols.insert(1, cols.pop(cols.index('comm')))
 		merged_df = merged_df[cols]
+
+	merged_df.drop(columns=['Max_delay_start_s', 'Max_delay_end_s'], errors='ignore', inplace=True)
 	merged_df.to_csv(args.output, index=False)
 	print(f"{Fore.CYAN}	Merged CSV saved as '{args.output}'{Fore.RESET}")
 

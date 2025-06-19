@@ -5,5 +5,6 @@ loadgen/capture/capture_data/
 loadgen/payload/launch_function.out
 workload_events.out
 loadgen/runners/tmp
+loadgen/tmp
 loadgen/dataset/trace
 */__pycache__/

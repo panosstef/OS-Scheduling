@@ -3,7 +3,13 @@
 import pandas as pd
 import numpy as np
 import os
+import argparse
 from collections import defaultdict
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Generate workload with configurable downscale factor')
+parser.add_argument('--downscale', type=float, default=100, help='Downscale factor for function invocations (default: 700)')
+args = parser.parse_args()
 
 __file = os.path.dirname(os.path.realpath(__file__))
 durations_file = f"{__file}/trace/function_durations_percentiles.anon.d01.csv"
@@ -59,7 +65,7 @@ occur_time = []
 # Generate the workload item for each minute
 for minute in arg_df.columns[0:2]:
     for arg in arg_df.index:
-        invoke_times = arg_df.loc[arg, minute] / 80  # downscale
+        invoke_times = arg_df.loc[arg, minute] / args.downscale  # use CLI argument
         interval = 60 / invoke_times
         for n in range(int(invoke_times)):
             time = int(minute) * 60 + n * interval
@@ -78,3 +84,6 @@ for t in output_list:
     line = " ".join(str(x) for x in t)
     f.write(line + "\n")
 f.close()
+
+#Large 100, 700 medium, 1700 small
+print (f"Workload generated with {len(output_list)} items, saved to {workload_file}")

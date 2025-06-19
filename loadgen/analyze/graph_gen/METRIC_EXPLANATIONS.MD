@@ -23,7 +23,7 @@ Total workload time (from the fork to the process exit), *thus response + execut
 - **Total Runtime (ms)**:
   Time spent running on a CPU *(Cpu burst between sched-in and sched-out)*
 
-- **Context Switches**:
+- **Contenct Switches**:
   Number of scheduler switches after execution (after sched_exec for each worklaod task)
 
 - **Scheduling Delays [avg] (ms)**:

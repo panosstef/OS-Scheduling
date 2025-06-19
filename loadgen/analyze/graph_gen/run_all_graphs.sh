@@ -13,7 +13,7 @@ echo "Starting graph generation with pattern: $PATTERN"
 
 # Change to the graph_gen directory
 cd "$(dirname "$0")"
-mkdir figures
+
 # Get the base log directory path (go up two levels from graph_gen)
 LOG_DIR="../../log"
 

@@ -50,7 +50,7 @@ SCHED_EVENTS=(
     # sched:sched_process_wait
     sched:sched_process_exit
     # sched:sched_process_free
-    # sched:sched_migrate_task
+    sched:sched_migrate_task
     sched:sched_switch
     # sched:sched_wakeup_new
     # sched:sched_wakeup

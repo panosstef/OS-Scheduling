@@ -2,12 +2,6 @@
 [ "$EUID" -ne 0 ] && exec sudo "$0" "$@"
 set -e
 
-exit_function() {
-	trap - EXIT ERR
-	rm -rf "$SCRIPT_DIR/tmp" 2>/dev/null
-}
-trap exit_function EXIT ERR SIGINT
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTNAME="$(hostname)"
 HOSTNAME="${HOSTNAME:2}"
@@ -15,15 +9,15 @@ DATE="$(date +%d-%m-%Y_%H:%M)"
 DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
 FILENAME="${1:-$DEFAULT_FILENAME}"
+FIFO_ARG="${2:-}"
 
 #Run the script with tracing
-rm -rf "$SCRIPT_DIR/tmp" 2>/dev/null
 mkdir -p "$SCRIPT_DIR/tmp"
 cd "$SCRIPT_DIR/tmp"
 
 #Run the script with tracing and move data perf.data
 echo "Running perf experiment with filename: $FILENAME"
-perf sched record ../../exec_workload.py --outputfile "$SCRIPT_DIR/tmp/$FILENAME" --time_log
+perf sched record ../../exec_workload.py --outputfile "$SCRIPT_DIR/tmp/$FILENAME" $FIFO_ARG --time_log
 
 pids=$(awk '{print $1}' $FILENAME\_pids.txt | paste -sd,)
 
@@ -36,6 +30,8 @@ perf sched timehist -i perf.data -f -p $pids > timehist.txt
 perf sched timehist -i perf.data -f -S > timehist_full.txt
 awk 'BEGIN{RS=""; ORS="\n\n"; i=1} {if(i==2) print > "timehist_avg.txt"; else if(i>=3) print > "timehist_rest.txt"; i++}' timehist_full.txt
 cat timehist_rest.txt >> gen_stats.txt
+echo -n "total_workload_size: " >> gen_stats.txt && wc -l < ../../dataset/workload_dur.txt >> gen_stats.txt
+
 
 #Parse the results
 echo "Parsing the results"

@@ -2,6 +2,7 @@ import psutil
 import os
 import subprocess
 import __main__
+import pandas as pd
 from colorama import Fore, Style
 
 script_dir = os.path.dirname(os.path.realpath(__main__.__file__))
@@ -49,21 +50,33 @@ def debug_iat(time_fired, iat_values, start_simulation, outputfile):
 				f.write(
 					f"{interarrival_times[i][1]}: {(interarrival_times[i][0] - iat_values[i])/iat_values[i]}%\n")
 
-
 def log_tasks_output(task_results, outputfile):
 	# Extract PID and argument from each output line
 	lines = []
-	for output in task_results:
-		parts = output.split()
-		pid = parts[1]
-		arg = parts[2].split("(")[1].split(")")[0]
+	timing_data = []
+
+	for (output, arg, request_time, return_time) in task_results:
+		pid = output.split()[0]
 		lines.append(f"{pid} {arg}")
 
-	# Write to file
+		# For timings output
+		duration = return_time - request_time
+		timing_data.append({
+			'pid': pid,
+			'arg': arg,
+			'request_time': request_time,
+			'return_time': return_time,
+			'duration': duration
+		})
+
+	# Write to file pids with arguments
 	with open(f"{outputfile}_pids.txt", "w") as f:
 		f.write("\n".join(lines) + "\n")
 	print(f"{Fore.CYAN}Run {len(lines)} tasks. Pids saved in {outputfile}_pids.txt{Style.RESET_ALL}")
 
+	#Another file add timing data as cs
+	timing_df = pd.DataFrame(timing_data)
+	timing_df.to_csv(f"{outputfile}_timings.csv" ,index=False)
 
 def log_total_time(outputfile, total_time):
 	with open(f"{os.getcwd()}/gen_stats.txt", "a") as f:
