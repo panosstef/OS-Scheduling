@@ -8,3 +8,7 @@ loadgen/runners/tmp
 loadgen/tmp
 loadgen/dataset/trace
 */__pycache__/
+*.o
+vmlinux.h
+*.skel.h
+scx_serverless
