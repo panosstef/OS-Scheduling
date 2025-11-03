@@ -3,6 +3,13 @@
 
 char _license[] SEC("license") = "GPL";
 
+// Debug macro: only prints when DEBUG is defined
+#ifdef DEBUG
+#define DEBUG_PRINTK(fmt, ...) bpf_printk(fmt, ##__VA_ARGS__)
+#else
+#define DEBUG_PRINTK(fmt, ...) do {} while (0)
+#endif
+
 static u64 vtime_now;
 UEI_DEFINE(uei);
 
@@ -83,7 +90,6 @@ static volatile u32 usersched_needed;
  * operation).
  */
 static void set_usersched_needed(void) {
-	bpf_printk("scx_serverless: [set_usersched_needed] setting user-space scheduler needed flag");
 	__sync_fetch_and_or(&usersched_needed, 1);
 }
 
@@ -122,15 +128,17 @@ static void send_wake_msg(void) {
 		return;
 	}
 
-	msg->value = 1;
+	// This is just a dummy value for the message, if more than one message types was to be supported,
+	// we could use this field to differentiate them. For the time being the value set is just useless so we microptimize it away
+	// (1 assembly instruction saved :))
+	// msg->value = 1;
 	bpf_ringbuf_submit(msg, 0);
 
-	bpf_printk("send_wake_msg: wakeup sent to userspace\n");
+	DEBUG_PRINTK("%-30s wakeup sent to userspace", "[send_wake_msg]");
 
 }
 
 static void dispatch_user_scheduler(void) {
-	bpf_printk("scx_serverless: [dispatch_user_scheduler] dispatching user scheduler");
 	struct task_struct *p;
 
 	p = usersched_task();
@@ -142,66 +150,29 @@ static void dispatch_user_scheduler(void) {
 	send_wake_msg();
 }
 
-static void enqueue_task_in_user_space(struct task_struct *p) {
-	bpf_printk("scx_serverless: [enqueue_task_in_user_space] enqueueing task %d in user space", p->pid);
+static void enqueue_task_in_userspace(struct task_struct *p) {
+	DEBUG_PRINTK("%-30s enqueueing task %d in user space", "[enqueue_task_userspace]", p->pid);
 	struct scx_serverless_enqueued_task task = {};
 
 	task.pid = p->pid;
 
 	if (bpf_map_push_elem(&enqueued, &task, 0)) {
-		// If we fail to enqueue the task in user space, put it
-		// directly on the global DSQ.
-		bpf_printk("scx_serverless: [enqueue_task_in_user_space] failed to enqueue task %d in user space, putting it on the global DSQ", p->pid);
+		// If we fail to enqueue the task in user space, put it directly on the global DSQ.
+		DEBUG_PRINTK("%-30s failed to enqueue task %d in user space, putting it on the global DSQ", "[enqueue_task_in_user	space]", p->pid);
 		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
-	} else {
-		__sync_fetch_and_add(&nr_user_enqueues, 1);
-		set_usersched_needed();
+		return;
 	}
-	bpf_printk("scx_serverless: [enqueue_task_in_user_space] successfully enqueued task %d in user space", p->pid);
+	__sync_fetch_and_add(&nr_user_enqueues, 1);
+	set_usersched_needed();
+
 }
 
-void BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
-	bpf_printk("scx_serverless: [serverless_enqueue] enqueueing task %d", p->pid);
-	if(is_usersched_task(p)) {
-		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_INF, enq_flags);
-	}
-	else {
-		struct task_ctx *tctx;
-		tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
-		if (!tctx) {
-			scx_bpf_error("Failed to lookup task ctx for %d", p->pid);
-			return;
-		}
-
-		u64 vtime = p->scx.dsq_vtime;
-		/*
-		* Limit the amount of budget that an idling task can accumulate
-		* to one slice.
-		*/
-		if (time_before(vtime, vtime_now - tctx->slice))
-			vtime = vtime_now - tctx->slice;
-
-
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, enq_flags);
-		bpf_printk("scx_serverless: [serverless_enqueue] successfully enqueued task %d with slice %llu", p->pid, tctx->slice);
-	}
-}
-
-
-int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
-	// s32 nr_dsq = scx_bpf_dsq_nr_queued(SHARED_DSQ_ID);
-	// bpf_printk("scx_serverless: [serverless_dispatch] number of tasks on the DQQ: %llu", nr_dsq);
-	if (test_and_clear_usersched_needed()) {
-		bpf_printk("scx_serverless: [serverless_dispatch] user-space scheduler needed, dispatching user scheduler");
-		dispatch_user_scheduler();
-	}
-
+static void dequeue_tasks_from_userspace(void)
+{
 	struct scx_serverless_dispatched_task u_task;
 
 	bpf_repeat(MAX_ENQUEUED_TASKS) {
-		s32 pid;
 		struct task_struct *p;
-
 		if (bpf_map_pop_elem(&dispatched, &u_task)) {
 			break;
 		}
@@ -210,32 +181,122 @@ int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
 		 * dispatching it. Treat this as a normal occurrence, and simply
 		 * move onto the next iteration.
 		 */
-
-		pid = u_task.pid;
-		p = bpf_task_from_pid(pid);
-		bpf_printk("scx_serverless: [serverless_dispatch] popped task %d from dispatched map", pid);
-		if (!p)
+		p = bpf_task_from_pid(u_task.pid);
+		if (!p) {
+			DEBUG_PRINTK("%-30s failed to find task %d, skipping", "[dequeue_tasks_from_userspace]", u_task.pid);
+			scx_bpf_error("Failed to find task %d", u_task.pid);
 			continue;
+		}
 
-		struct task_ctx *task_ctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
-		if (!task_ctx) {
-			scx_bpf_error("Failed to lookup task ctx for %d", p->pid);
+		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+		if (!tctx) {
+			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[dequeue_tasks_from_userspace]", p->pid);
+			scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
 			bpf_task_release(p);
 			continue;
 		}
 
-		if(u_task.slice == 0) {
-			// If the slice is zero, we use the default slice value.
-			bpf_printk("scx_serverless: [serverless_dispatch] task %d has zero slice, using default slice", p->pid);
-			u_task.slice = SCX_SLICE_DFL;
+		// If the slice is zero, we use the default slice value.
+		// If the slice is one, we use infinite slice.
+		if (u_task.slice <= 1) {
+			u_task.slice = (u_task.slice == 0) ? SCX_SLICE_DFL : SCX_SLICE_INF;
+			DEBUG_PRINTK("%-30s task %d has %s slice", "[dequeue_tasks_from_userspace]",
+				     p->pid, u_task.slice == SCX_SLICE_INF ? "infinite" : "default");
 		}
 
-		task_ctx->slice = u_task.slice;
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, task_ctx->slice, vtime_now, 0);
-		bpf_printk("scx_serverless: [serverless_dispatch] successfully dispatched task %d with slice %llu", p->pid, task_ctx->slice);
+		tctx->slice = u_task.slice;
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime_now, 0);
+		DEBUG_PRINTK("%-30s task %d uspace --> k, task_slice %llu", "[dequeue_tasks_from_userspace]", p->pid, tctx->slice);
 		bpf_task_release(p);
 	}
+}
 
+int create_task_ctx(struct task_struct *p) {
+
+	if (!bpf_task_storage_get(&task_ctx_stor, p, 0, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
+		DEBUG_PRINTK("%-30s Failed to create task ctx for %d", "[create_task_ctx]", p->pid);
+		scx_bpf_error("Failed to create task ctx for %d", p->pid);
+		return -1;
+	}
+
+	return 0;
+}
+
+s32 BPF_STRUCT_OPS(serverless_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags) {
+	// Decode wakeup flags
+	// wake_flags: SCX_WAKE_*, possible values are:
+	// SCX_WAKE_FORK (0x02) - Wakeup after exe
+	// SCX_WAKE_TTWU (0x04) - Wakeup after fork
+	// SCX_WAKE_SYNC (0x08) - Wakeup
+
+	bool is_idle = false;
+	s32 cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+
+	DEBUG_PRINTK("%-30s select_cpu for task %d, selected_cpu %d, prev_cpu %d, wake_flags 0x%llx", "[serverless_select_cpu]", p->pid, cpu, prev_cpu, (unsigned long long) wake_flags);
+
+	if (is_idle) {
+		// Get task context to use correct slice
+		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+		if (!tctx) {
+			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_select_cpu]", p->pid);
+			scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+			return cpu;
+		}
+		DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, tctx->slice);
+		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, tctx->slice, 0);
+	}
+	return cpu;
+}
+
+s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
+	DEBUG_PRINTK("%-30s enqueueing task %d, associated_cpu %d, enq_flags 0x%llx",	"[serverless_enqueue]", p->pid,	scx_bpf_task_cpu(p), (unsigned long long)enq_flags);
+
+	if(is_usersched_task(p)) {
+		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_INF, enq_flags);
+		return 0;
+	}
+	struct task_ctx *tctx;
+	tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+	if (!tctx) {
+		DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_enqueue]", p->pid);
+		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
+		return 0;
+	}
+
+	u64 vtime = p->scx.dsq_vtime;
+	p->scx.slice = tctx->slice;
+	/*
+	* Limit the amount of budget that an idling task can accumulate
+	* to one slice.
+	*/
+	if (time_before(vtime, vtime_now - tctx->slice))
+		vtime = vtime_now - tctx->slice;
+
+	scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, enq_flags);
+	DEBUG_PRINTK("%-30s task %d enqueued ,ran_time %llu and task_slice %llu", "[serverless_enqueue]", p->pid, vtime, tctx->slice);
+
+	return 0;
+}
+
+int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
+	if (test_and_clear_usersched_needed()) {
+		dispatch_user_scheduler();
+	}
+
+	// Dequeue tasks that are sent from userspace through *dispatched* map
+	dequeue_tasks_from_userspace();
+
+	// Move tasks from the shared DSQ to the local DSQ, if any.
+	int nr_queued = scx_bpf_dsq_nr_queued(SHARED_DSQ_ID);
+	if(nr_queued > 0) {
+		DEBUG_PRINTK("%-30s there are %d tasks in the shared DSQ", "[serverless_dispatch]", nr_queued);
+		if(!scx_bpf_dsq_move_to_local(SHARED_DSQ_ID)) {
+			DEBUG_PRINTK("%-30s failed to move tasks from shared DSQ to local DSQ", "[serverless_dispatch]");
+		}
+		else {
+			DEBUG_PRINTK("%-30s moved task from shared DSQ to local DSQ", "[serverless_dispatch]");
+		}
+	}
 	return 0;
 }
 
@@ -245,6 +306,7 @@ int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
  * work to do.
  */
 void BPF_STRUCT_OPS(serverless_update_idle, s32 cpu, bool idle) {
+	DEBUG_PRINTK("%-30s cpu %d %s idle", "[serverless_update_idle]", cpu, idle?"entering":"exiting");
 	/*
 	 * Don't do anything if we exit from and idle state, a CPU owner will
 	 * be assigned in .running().
@@ -287,69 +349,88 @@ void BPF_STRUCT_OPS(serverless_update_idle, s32 cpu, bool idle) {
 	}
 }
 
+#ifdef DEBUG
+void BPF_STRUCT_OPS(serverless_runnable, struct task_struct *p) {
+	DEBUG_PRINTK("%-30s task %d runnable, ran time %llu, rem_slice %llu", "[serverless_runnable]", p->pid, p->scx.dsq_vtime, p->scx.slice);
+}
+#endif
+
 void BPF_STRUCT_OPS(serverless_running, struct task_struct *p) {
 	// Global vtime always progresses forward as tasks start executing. The
 	// test and update can be performed concurrently from multiple CPUs and
 	// thus racy. Any error should be contained and temporary. Let's just
 	// live with it.
-	bpf_printk("scx_serverless: [serverless_running] running task %d, with vtime %llu", p->pid, p->scx.dsq_vtime);
+	bool cond = time_before(vtime_now, p->scx.dsq_vtime);
 
-	if (time_before(vtime_now, p->scx.dsq_vtime))
+	if (cond) {
 		vtime_now = p->scx.dsq_vtime;
+	}
+
+	DEBUG_PRINTK("%-30s task %d running, ran_time %llu, rem_slice %llu, new global vtime_now %llu, cond=%d", "[serverless_running]", p->pid, p->scx.dsq_vtime, p->scx.slice, vtime_now, cond);
+
 }
 
 void BPF_STRUCT_OPS(serverless_stopping, struct task_struct *p, bool runnable) {
-	p->scx.dsq_vtime += (SCX_SLICE_DFL - p->scx.slice) * 100 / p->scx.weight;
+	struct task_ctx *tctx;
+	tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+	if (!tctx) {
+		DEBUG_PRINTK("%-30s failed to get task ctx for task %d, what to do now?", "[serverless_stopping]", p->pid);
+		scx_bpf_error("Failed to get task ctx for %d", p->pid);
+		return;
+	}
+
+	DEBUG_PRINTK("%-30s task %d stopping (runnable = %d), rem_slice %llu, task_slice %llu, weight %llu", "[serverless_stopping]", p->pid, runnable, p->scx.slice, tctx->slice, p->scx.weight);
+
+	p->scx.dsq_vtime += (tctx->slice - p->scx.slice) * 100 / p->scx.weight;
 }
 
-int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
-	bpf_printk("scx_serverless: [serverless_enable] enabling task %d", p->pid);
-	p->scx.dsq_vtime = vtime_now;
-
-	if (!bpf_task_storage_get(&task_ctx_stor, p, 0, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
-		scx_bpf_error("Failed to create task ctx for %d", p->pid);
-		return -ENOMEM;
-	}
-
-	if(!is_usersched_task(p)) {
-		bpf_printk("scx_serverless: [serverless_enable] task %d is not the user scheduler, enqueueing in user space", p->pid);
-		enqueue_task_in_user_space(p);
-	}
-	else if (test_and_clear_usersched_needed()){
-		bpf_printk("scx_serverless: [serverless_enable] task %d is the user scheduler", p->pid);
-		dispatch_user_scheduler();
-	}
-
-	return 0;
+#ifdef DEBUG
+void BPF_STRUCT_OPS(serverless_quiescent, struct task_struct *p, u64 deq_flags) {
+	DEBUG_PRINTK("%-30s task %d quiescent, deq_flags 0x%llx", "[serverless_quiescent]", p->pid, (unsigned long long) deq_flags);
 }
+
+void BPF_STRUCT_OPS(serverless_tick, struct task_struct *p) {
+	u64 slice_ms = p->scx.slice / 1000000ULL;
+	DEBUG_PRINTK("%-30s sched tick, running task %d, rem_slice %llu (%llu ms)",
+		"[serverless_tick]", p->pid, p->scx.slice, slice_ms);
+}
+#endif
 
 int BPF_STRUCT_OPS(serverless_init_task, struct task_struct *p, struct scx_init_task_args *args) {
-	// bpf_printk("scx_serverless: [serverless_init_task] initializing task %d", p->pid);
-	struct task_ctx *tctx;
+	DEBUG_PRINTK("%-30s init task %d", "[serverless_init_task]", p->pid);
+	p->scx.dsq_vtime = vtime_now;
 
-	tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
-	if (!tctx) {
-		scx_bpf_error("Failed to create task ctx for %d", p->pid);
+	if (create_task_ctx(p) < 0) {
 		return -ENOMEM;
 	}
 
-	// Initialize the slice to a default value.
-	tctx->slice = SCX_SLICE_DFL;
 	return 0;
 }
 
 int BPF_STRUCT_OPS(serverless_exit_task, struct task_struct *p, struct scx_exit_task_args *args) {
-	// bpf_printk("scx_serverless: [serverless_exit_task] exiting task %d, args", p->pid);
-	if(!bpf_task_storage_delete(&task_ctx_stor, p)) {
-		// bpf_printk("scx_serverless: [serverless_exit_task] Failed to delete task ctx for %d", p->pid);
-		return -ENOENT;
+	DEBUG_PRINTK("%-30s exiting task %d", "[serverless_exit_task]", p->pid);
+	bpf_task_storage_delete(&task_ctx_stor, p);
+	return 0;
+}
+
+int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
+	DEBUG_PRINTK("%-30s enabling task %d", "[serverless_enable]", p->pid);
+	p->scx.dsq_vtime = vtime_now;
+
+	if (create_task_ctx(p) < 0) {
+		return -ENOMEM;
+	}
+
+	if(!is_usersched_task(p)) {
+		enqueue_task_in_userspace(p);
 	}
 
 	return 0;
 }
 
 s32 BPF_STRUCT_OPS_SLEEPABLE(serverless_init) {
-	bpf_printk("scx_serverless: [serverless_init] initializing");
+	bpf_printk("%-24s Initializing scheduler", "[serverless_init]");
+
 	if (usersched_pid <= 0) {
 		scx_bpf_error("User scheduler pid uninitialized (%d)", usersched_pid);
 		return -EINVAL;
@@ -359,27 +440,28 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(serverless_init) {
 }
 
 void BPF_STRUCT_OPS(serverless_exit, struct scx_exit_info *ei) {
-	bpf_printk("scx_serverless: [serverless_exit] exiting");
+	scx_bpf_destroy_dsq(SHARED_DSQ_ID);
+	bpf_printk("%-24s Exiting scheduler", "[serverless_exit]");
 	UEI_RECORD(uei, ei);
-}
-
-void BPF_STRUCT_OPS(serverless_runnable, struct task_struct *p, u64 enq_flags) {
-	bpf_printk("scx_serverless: [serverless_runnable] runnable task %d", p->pid);
 }
 
 
 SCX_OPS_DEFINE(serverless_ops,
-	       .enqueue			= (void *)serverless_enqueue,
-	       .dispatch		= (void *)serverless_dispatch,
+		   .select_cpu		= (void *)serverless_select_cpu,
+		   .enqueue			= (void *)serverless_enqueue,
+		   .dispatch		= (void *)serverless_dispatch,
 		   .running			= (void *)serverless_running,
+#ifdef DEBUG
+		   .runnable		= (void *)serverless_runnable,
+		   .quiescent		= (void *)serverless_quiescent,
+		   .tick			= (void *)serverless_tick,
+#endif
 		   .stopping		= (void *)serverless_stopping,
-	       .update_idle		= (void *)serverless_update_idle,
-	       .init_task		= (void *)serverless_init_task,
+		   .update_idle		= (void *)serverless_update_idle,
+		   .init_task		= (void *)serverless_init_task,
 		   .enable			= (void *)serverless_enable,
 		   .exit_task		= (void *)serverless_exit_task,
-	       .init			= (void *)serverless_init,
-	       .exit			= (void *)serverless_exit,
-		   .runnable		= (void *)serverless_runnable,
-	       .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE | SCX_OPS_SWITCH_PARTIAL,
-	       .name			= "serverless");
-//SCX_OPS_SWITCH_PARTIAL
+		   .init			= (void *)serverless_init,
+		   .exit			= (void *)serverless_exit,
+		   .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE |SCX_OPS_SWITCH_PARTIAL,
+		   .name			= "serverless");

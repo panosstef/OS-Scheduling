@@ -12,3 +12,5 @@ loadgen/dataset/trace
 vmlinux.h
 *.skel.h
 scx_serverless
+scx_serverless_debug
+.vscode/
