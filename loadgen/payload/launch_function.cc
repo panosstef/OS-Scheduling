@@ -11,7 +11,6 @@ unsigned long long fibonacci(int n) {
 }
 
 int main(int argc, char *argv[]) {
-    // Add the process to a cgroup for workload management
     std::string pid = std::to_string(getpid());
 
     int arg = atoi(argv[1]);

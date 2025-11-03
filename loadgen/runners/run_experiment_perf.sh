@@ -10,6 +10,7 @@ DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
 FILENAME="${1:-$DEFAULT_FILENAME}"
 FIFO_ARG="${2:-}"
+SCHED_EXT_ARG="${3:-}"
 
 #Run the script with tracing
 mkdir -p "$SCRIPT_DIR/tmp"
@@ -17,7 +18,7 @@ cd "$SCRIPT_DIR/tmp"
 
 #Run the script with tracing and move data perf.data
 echo "Running perf experiment with filename: $FILENAME"
-perf sched record ../../exec_workload.py --outputfile "$SCRIPT_DIR/tmp/$FILENAME" $FIFO_ARG --time_log
+perf sched record ../../exec_workload.py --outputfile "$SCRIPT_DIR/tmp/$FILENAME" $FIFO_ARG $SCHED_EXT_ARG --time_log
 
 pids=$(awk '{print $1}' $FILENAME\_pids.txt | paste -sd,)
 
@@ -32,12 +33,11 @@ awk 'BEGIN{RS=""; ORS="\n\n"; i=1} {if(i==2) print > "timehist_avg.txt"; else if
 cat timehist_rest.txt >> gen_stats.txt
 echo -n "total_workload_size: " >> gen_stats.txt && wc -l < ../../dataset/workload_dur.txt >> gen_stats.txt
 
-
 #Parse the results
 echo "Parsing the results"
 ../../analyze/parse_perf/parse_perf_latency.py latency.txt $FILENAME\_pids.txt $FILENAME\_latencies.csv
-../../analyze/parse_perf/parse_perf_timehist.py timehist.txt $FILENAME\_sch_latencies.csv
-../../analyze/parse_perf/parse_perf_timehist_avg.py timehist_avg.txt $FILENAME\_sch_latencies_avg.csv
+../../analyze/parse_perf/parse_perf_timehist.py timehist.txt  $FILENAME\_sch_latencies.csv
+../../analyze/parse_perf/parse_perf_timehist_avg.py timehist_avg.txt $FILENAME\_pids.txt $FILENAME\_sch_latencies_avg.csv
 
 #Combine the results from the latency and timehist_avg
 ../../analyze/parse_perf/combine_stats_csvs.py $FILENAME\_latencies.csv $FILENAME\_sch_latencies_avg.csv -o $FILENAME\_stats.csv

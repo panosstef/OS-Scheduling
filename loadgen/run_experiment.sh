@@ -5,52 +5,62 @@ rm -rf tmp
 
 # Function to run test mode
 test_setup() {
-    echo "Running in test mode..."
+	echo "Running in test mode..."
 
-    # Change to the correct directory first
-    cd /shared/loadgen
-    cp dataset/workload_dur.txt dataset/workload_dur_original.txt
-    head -n 20 dataset/workload_dur.txt > dataset/workload_dur_temp.txt
-    mv dataset/workload_dur_temp.txt dataset/workload_dur.txt
+	# Change to the correct directory first
+	cd /shared/loadgen
+	cp dataset/workload_dur.txt dataset/workload_dur_original.txt
+	head -n 20 dataset/workload_dur.txt > dataset/workload_dur_temp.txt
+	mv dataset/workload_dur_temp.txt dataset/workload_dur.txt
 
-    # Setup exit handler to restore original file
-    restore_workload() {
-        echo "Restoring original workload file..."
-        cd /shared/loadgen
-        if [ -f dataset/workload_dur_original.txt ]; then
-            mv dataset/workload_dur_original.txt dataset/workload_dur.txt
-        fi
-    }
-    trap 'restore_workload' EXIT INT TERM ERR
+	# Setup exit handler to restore original file
+	restore_workload() {
+		echo "Restoring original workload file..."
+		cd /shared/loadgen
+		if [ -f dataset/workload_dur_original.txt ]; then
+			mv dataset/workload_dur_original.txt dataset/workload_dur.txt
+		fi
+	}
+	trap 'restore_workload' EXIT INT TERM ERR
 }
 
 # Parse arguments
 FIFO_ARG=""
 NO_LOG_ARG=""
 CUSTOM_FILENAME=""
+SCHED_EXT_ARG=""
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        --test)
-            test_setup
-            shift
-            ;;
-        --fifo)
-            FIFO_ARG="--fifo"
-            shift
-            ;;
-        --no_log)
-            NO_LOG_ARG="--no_log"
-            shift
-            ;;
-        *)
-            # First positional argument is filename
-            if [[ -z "$CUSTOM_FILENAME" ]]; then
-                CUSTOM_FILENAME="$1"
-            fi
-            shift
-            ;;
-    esac
+	case $1 in
+		--test)
+			test_setup
+			shift
+			;;
+		--fifo)
+			FIFO_ARG="--fifo"
+			shift
+			;;
+		--sched_ext)
+			SCHED_EXT_ARG="--sched_ext"
+			shift
+			;;
+		--no_log)
+			NO_LOG_ARG="--no_log"
+			shift
+			;;
+		--*)
+			echo "Error: Unknown argument '$1'"
+			echo "Valid arguments: --test, --fifo, --sched_ext, --no_log [filename]"
+			exit 1
+			;;
+		*)
+			# First positional argument is filename
+			if [[ -z "$CUSTOM_FILENAME" ]]; then
+				CUSTOM_FILENAME="$1"
+			fi
+			shift
+			;;
+	esac
 done
 
 HOSTNAME="$(hostname)"
@@ -69,17 +79,19 @@ echo -e "Syncing shared folder to home directory\n"
 rsync -av --delete --exclude 'dataset/trace' --exclude '.git' /shared/loadgen ~/
 cd ~/loadgen/runners
 
-#Setup cpu isolation
-../cpu_isolation/setup_cpu_isolation.sh --main_cpu 0
-echo $$ > /sys/fs/cgroup/loadgen/orchestrator/cgroup.procs
+# Ensure that sched_ext is running else exit
+if [[ -n "$SCHED_EXT_ARG" ]]; then
+	echo "Checking if sched_ext is running..."
+	if [[ ! -f /sys/kernel/sched_ext/root/ops ]]; then
+		echo "sched_ext does not appear to be running. Please ensure the sched_ext kernel module is loaded."
+		exit 1
+	fi
+fi
 
 #Run the ftrace experiment and perf experiment
-./run_experiment_ftrace.sh $FILENAME $FIFO_ARG
+./run_experiment_ftrace.sh $FILENAME $FIFO_ARG $SCHED_EXT_ARG
 
-./run_experiment_perf.sh $FILENAME $FIFO_ARG
-
-#Cleanup cpu isolation
-../cpu_isolation/cleanup_cpu_isolation.sh
+./run_experiment_perf.sh $FILENAME $FIFO_ARG $SCHED_EXT_ARG
 
 #Sync the results back to the shared folder (only if not using --no_log)
 if [[ -z "$NO_LOG_ARG" ]]; then

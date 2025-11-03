@@ -10,13 +10,14 @@ DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
 FILENAME="${1:-$DEFAULT_FILENAME}"
 FIFO_ARG="${2:-}"
+SCHED_EXT_ARG="${3:-}"
 
 #Run the script with tracing
 mkdir -p "$SCRIPT_DIR/tmp"
 
 #Run the script with tracing
 echo -e "\nRunning ftrace experiment with filename: $FILENAME"
-../capture/trace-cmd.sh --output "$SCRIPT_DIR/tmp/$FILENAME.dat" ../exec_workload.py --outputfile  "$SCRIPT_DIR/tmp/$FILENAME" $FIFO_ARG --cpu_log
+../capture/trace-cmd.sh --output "$SCRIPT_DIR/tmp/$FILENAME.dat" ../exec_workload.py --outputfile  "$SCRIPT_DIR/tmp/$FILENAME" $FIFO_ARG $SCHED_EXT_ARG --cpu_log
 
 #Analyze the trace file
 trace-cmd report -R -t -w --ts-check -i "$SCRIPT_DIR/tmp/$FILENAME.dat" > "$SCRIPT_DIR/tmp/$FILENAME.txt"

@@ -13,4 +13,5 @@ vmlinux.h
 *.skel.h
 scx_serverless
 scx_serverless_debug
+run_with_sched_ext
 .vscode/
