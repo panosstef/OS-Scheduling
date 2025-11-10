@@ -3,7 +3,7 @@ import time
 import argparse
 import subprocess
 import threading
-import os, ctypes
+import os
 from utils.exec_utils import log_tasks_output, log_total_time, set_ulimit
 from utils.cpu_monitoring import start_cpu_monitoring, stop_cpu_monitoring
 from colorama import Fore, Style

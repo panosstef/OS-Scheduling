@@ -137,6 +137,9 @@ static __u64 nr_user_to_kernel_enqueues, nr_slice_dispatches, nr_slice_failed;
 /* Number of tasks currently enqueued. */
 static __u64 nr_curr_enqueued;
 
+/* Counter for tasks that received a slice assignment. */
+static __u64 nr_tasks_assigned_slice;
+
 /* The data structure containing tasks that are enqueued in user space.
  * From this list the dispatch path takes tasks to dispatch them to the
  * kernel.
@@ -263,8 +266,7 @@ int read_cmdline(pid_t pid, char *buf, size_t size) {
 	fclose(f);
 
 	if (len == 0) {
-		if (verbose)
-			printf("		[read_cmdline] : read 0 bytes for PID %d\n", pid);
+			printf("		[read_cmdline] : Fail, read 0 bytes for PID %d\n", pid);
 		return -1;
 	}
 
@@ -293,8 +295,7 @@ static __u64 get_slice_for_fib_arg(int fib_arg) {
 		return 0;
 	}
 
-	// Direct array access msing offset: fib_arg 29 -> index 0, fib_arg 30 -> index 1, etc.
-	printf("%d", fib_arg-FIB_ARG_MIN);
+	// Direct array access: fib_arg 29 -> index 0, fib_arg 30 -> index 1, etc.
 	__u64 slice = fib_slice_map[fib_arg - FIB_ARG_MIN].runtime_ns;
 	if (verbose)
 		printf("		[get_slice_for_fib_arg] : returning %llu ns (~%llu ms) for arg %d\n", slice, slice / 1000000ULL, fib_arg);
@@ -361,8 +362,6 @@ static int local_enqueue_task(const struct scx_serverless_enqueued_task *bpf_tas
 	char task_arg[512];
 
 	if (read_cmdline(bpf_task->pid, task_arg, sizeof(task_arg)) < 0) {
-		if (verbose)
-			printf("		[local_enqueue_task] : failed to read cmdline for PID %d\n", bpf_task->pid);
 		goto enqueue;
 	}
 
@@ -374,7 +373,8 @@ static int local_enqueue_task(const struct scx_serverless_enqueued_task *bpf_tas
 		}
 
 	slice = get_slice_for_fib_arg(fib_arg);
-	printf("		[local_enqueue_task] : Task %d (fib arg %d): assigned slice %llu ms\n", bpf_task->pid, fib_arg, slice);
+	nr_tasks_assigned_slice++;
+	printf("		[local_enqueue_task] : Task %d (fib arg %d): assigned slice %llu ms (total tasks assigned: %llu)\n", bpf_task->pid, fib_arg, slice, nr_tasks_assigned_slice);
 
 	// Set the calculated slice in the task
 	enqueue:

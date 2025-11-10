@@ -167,8 +167,7 @@ static void enqueue_task_in_userspace(struct task_struct *p) {
 
 }
 
-static void dequeue_tasks_from_userspace(void)
-{
+static void dequeue_tasks_from_userspace(void) {
 	struct scx_serverless_dispatched_task u_task;
 
 	bpf_repeat(MAX_ENQUEUED_TASKS) {

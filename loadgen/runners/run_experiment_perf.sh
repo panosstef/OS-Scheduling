@@ -8,11 +8,42 @@ HOSTNAME="${HOSTNAME:2}"
 DATE="$(date +%d-%m-%Y_%H:%M)"
 DEFAULT_FILENAME="${HOSTNAME}_${DATE}"
 
-FILENAME="${1:-$DEFAULT_FILENAME}"
-FIFO_ARG="${2:-}"
-SCHED_EXT_ARG="${3:-}"
+FILENAME=""
+FIFO_ARG=""
+SCHED_EXT_ARG=""
 
-#Run the script with tracing
+# Flexible argument parsing so the script can be called either:
+#  ./run_experiment_perf.sh <filename> [--fifo] [--sched_ext]
+# or with flags in any order:
+#  ./run_experiment_perf.sh --fifo --sched_ext <filename>
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--fifo)
+			FIFO_ARG="--fifo"
+			shift
+			;;
+		--sched_ext)
+			SCHED_EXT_ARG="--sched_ext"
+			shift
+			;;
+		-h|--help)
+			echo "Usage: $0 [filename] [--fifo] [--sched_ext]"
+			exit 0
+			;;
+		*)
+			if [[ -z "$FILENAME" ]]; then
+				FILENAME="$1"
+			else
+				echo "Warning: unexpected argument '$1' ignored"
+			fi
+			shift
+			;;
+	esac
+done
+
+# Fallback to default filename
+FILENAME="${FILENAME:-$DEFAULT_FILENAME}"
+
 mkdir -p "$SCRIPT_DIR/tmp"
 cd "$SCRIPT_DIR/tmp"
 
