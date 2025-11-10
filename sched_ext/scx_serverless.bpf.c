@@ -183,7 +183,6 @@ static void dequeue_tasks_from_userspace(void) {
 		p = bpf_task_from_pid(u_task.pid);
 		if (!p) {
 			DEBUG_PRINTK("%-30s failed to find task %d, skipping", "[dequeue_tasks_from_userspace]", u_task.pid);
-			scx_bpf_error("Failed to find task %d", u_task.pid);
 			continue;
 		}
 
