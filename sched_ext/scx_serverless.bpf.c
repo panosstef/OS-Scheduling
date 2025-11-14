@@ -210,8 +210,11 @@ static void dequeue_tasks_from_userspace(void) {
 }
 
 int create_task_ctx(struct task_struct *p) {
-
-	if (!bpf_task_storage_get(&task_ctx_stor, p, 0, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
+	// Initiliaze to 3 (not assigned a slice yet)
+	struct task_ctx init_tctx = {
+		.slice = 3,
+	};
+	if (!bpf_task_storage_get(&task_ctx_stor, p, &init_tctx, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
 		DEBUG_PRINTK("%-30s Failed to create task ctx for %d", "[create_task_ctx]", p->pid);
 		scx_bpf_error("Failed to create task ctx for %d", p->pid);
 		return -1;
@@ -221,29 +224,41 @@ int create_task_ctx(struct task_struct *p) {
 }
 
 s32 BPF_STRUCT_OPS(serverless_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags) {
-	// Decode wakeup flags
-	// wake_flags: SCX_WAKE_*, possible values are:
-	// SCX_WAKE_FORK (0x02) - Wakeup after exe
-	// SCX_WAKE_TTWU (0x04) - Wakeup after fork
-	// SCX_WAKE_SYNC (0x08) - Wakeup
 
 	bool is_idle = false;
 	s32 cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
 
 	DEBUG_PRINTK("%-30s select_cpu for task %d, selected_cpu %d, prev_cpu %d, wake_flags 0x%llx", "[serverless_select_cpu]", p->pid, cpu, prev_cpu, (unsigned long long) wake_flags);
 
-	if (is_idle) {
-		// Get task context to use correct slice
-		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
-		if (!tctx) {
-			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_select_cpu]", p->pid);
-			scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
-			return cpu;
-		}
-		DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, tctx->slice);
-		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, tctx->slice, 0);
+	if (!is_idle) {
+		// Non-idle CPU, just return the selected one
+		return cpu;
 	}
-	return cpu;
+
+	// Get task context to use correct slice
+	struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+	if (!tctx) {
+		DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_select_cpu]", p->pid);
+		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+		return cpu;
+	}
+
+	if(tctx->slice == 3) {
+		DEBUG_PRINTK("%-30s task %d has not been assigned a slice yet", "[serverless_select_cpu]", p->pid);
+		// Pray that ops.enqueue() gets called and skips it as well :D
+		return cpu;
+	}
+
+	DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, tctx->slice);
+	if(tctx->slice == 0 || tctx->slice == 1) {
+		DEBUG_PRINTK("%-30s task %d has %s slice, using default slice for local enqueue", "[serverless_select_cpu]",
+			     p->pid, tctx->slice == 0 ? "default" : "infinite");
+		tctx->slice = SCX_SLICE_DFL;
+	}
+	DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, tctx->slice);
+	scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, tctx->slice, 0);
+
+    return cpu;
 }
 
 s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
@@ -258,6 +273,13 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 	if (!tctx) {
 		DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_enqueue]", p->pid);
 		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
+		return 0;
+	}
+
+	// Check that the task has been assigned a slice by userspace, skip (will be inserted to DSQ when popped from dispatched map) if not
+	// we find a corner and think about our code (and life) choices
+	if(tctx->slice == 3) {
+		DEBUG_PRINTK("%-30s task %d has not been assigned a slice yet, skipping", "[serverless_enqueue]", p->pid);
 		return 0;
 	}
 
