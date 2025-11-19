@@ -189,6 +189,7 @@ static void dequeue_tasks_from_userspace(void) {
 		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
 		if (!tctx) {
 			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[dequeue_tasks_from_userspace]", p->pid);
+			// Don't have a task context, use default slice, also don't create one, other paths will just use the default slice
 			scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
 			bpf_task_release(p);
 			continue;
@@ -198,8 +199,7 @@ static void dequeue_tasks_from_userspace(void) {
 		// If the slice is one, we use infinite slice.
 		if (u_task.slice <= 1) {
 			u_task.slice = (u_task.slice == 0) ? SCX_SLICE_DFL : SCX_SLICE_INF;
-			DEBUG_PRINTK("%-30s task %d has %s slice", "[dequeue_tasks_from_userspace]",
-				     p->pid, u_task.slice == SCX_SLICE_INF ? "infinite" : "default");
+			DEBUG_PRINTK("%-30s task %d has %s slice", "[dequeue_tasks_from_userspace]", p->pid, u_task.slice == SCX_SLICE_INF ? "infinite" : "default");
 		}
 
 		tctx->slice = u_task.slice;
@@ -210,8 +210,12 @@ static void dequeue_tasks_from_userspace(void) {
 }
 
 int create_task_ctx(struct task_struct *p) {
+	// Use default slice when creating task context
+	struct task_ctx tctx_init = {
+		.slice = SCX_SLICE_DFL,
+	};
 
-	if (!bpf_task_storage_get(&task_ctx_stor, p, 0, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
+	if (!bpf_task_storage_get(&task_ctx_stor, p, &tctx_init, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
 		DEBUG_PRINTK("%-30s Failed to create task ctx for %d", "[create_task_ctx]", p->pid);
 		scx_bpf_error("Failed to create task ctx for %d", p->pid);
 		return -1;
@@ -271,7 +275,7 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 		vtime = vtime_now - tctx->slice;
 
 	scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, enq_flags);
-	DEBUG_PRINTK("%-30s task %d enqueued ,ran_time %llu and task_slice %llu", "[serverless_enqueue]", p->pid, vtime, tctx->slice);
+	DEBUG_PRINTK("%-30s task %d enqueued ,ran_time %llu, task_slice %llu", "[serverless_enqueue]", p->pid, vtime, tctx->slice);
 
 	return 0;
 }
@@ -461,5 +465,5 @@ SCX_OPS_DEFINE(serverless_ops,
 		   .exit_task		= (void *)serverless_exit_task,
 		   .init			= (void *)serverless_init,
 		   .exit			= (void *)serverless_exit,
-		   .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE |SCX_OPS_SWITCH_PARTIAL,
+		   .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE | SCX_OPS_SWITCH_PARTIAL,
 		   .name			= "serverless");

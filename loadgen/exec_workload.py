@@ -4,7 +4,7 @@ import argparse
 import subprocess
 import threading
 import os
-from utils.exec_utils import log_tasks_output, log_total_time, set_ulimit
+import utils.exec_utils as exec_utils
 from utils.cpu_monitoring import start_cpu_monitoring, stop_cpu_monitoring
 from colorama import Fore, Style
 
@@ -40,7 +40,7 @@ def launch_command(command, arg, results, index, request_time, preexec_fn=None):
 def main(outputfile, time_log=False, cpu_log=False, fifo=False, sched_ext=False, no_log=False):
 	os.sched_setaffinity(0, {0})  # Set CPU affinity to CPU 0
 	os.nice(-15)
-	set_ulimit()
+	exec_utils.set_ulimit()
 
 	command = [f"{script_dir}/payload/launch_function.out"]
 
@@ -91,12 +91,15 @@ def main(outputfile, time_log=False, cpu_log=False, fifo=False, sched_ext=False,
 
 	print(f"{Fore.GREEN}Time elapsed: {end_simulation - start_simulation:.2f} s{Style.RESET_ALL}")
 	if time_log:
-		log_total_time(outputfile, end_simulation - start_simulation)
+		exec_utils.log_total_time(outputfile, end_simulation - start_simulation)
 
 	stop_cpu_monitoring(outputfile, start_simulation, end_simulation)
 
 	if not no_log:
-		log_tasks_output(results, outputfile)
+		exec_utils.log_tasks_output(results, outputfile)
+
+	# Debug write pids with arguments
+	exec_utils.debug_output_pids(results, outputfile)
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()

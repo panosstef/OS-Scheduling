@@ -81,3 +81,16 @@ def log_tasks_output(task_results, outputfile):
 def log_total_time(outputfile, total_time):
 	with open(f"{os.getcwd()}/gen_stats.txt", "a") as f:
 		f.write(f"{outputfile}: {total_time:.2f} s\n")
+
+def debug_output_pids(task_results, outputfile):
+	# Extract PID and argument from each output line
+	lines = []
+
+	for (output, arg, _, _) in task_results:
+		pid = output.split()[0]
+		lines.append(f"{pid} {arg}")
+
+	# Write to file pids with arguments
+	with open(f"{outputfile}_pids.txt", "w") as f:
+		f.write("\n".join(lines) + "\n")
+	print(f"{Fore.CYAN}Run {len(lines)} tasks. Pids saved in {outputfile}_pids.txt{Style.RESET_ALL}")

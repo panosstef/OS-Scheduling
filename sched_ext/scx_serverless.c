@@ -481,7 +481,8 @@ static int __attribute__((unused))spawn_stats_thread(void) {
 
 static int handle_wake_msg(void *ctx, void *data, size_t len) {
 	struct wake_msg *msg = data;
-	printf("Got wakeup, value=%llu\n", msg->value);
+	if (verbose)
+		printf("Got wakeup, value=%llu\n", msg->value);
 	return 0;
 }
 
@@ -593,7 +594,8 @@ static void bootstrap(char *comm) {
 void wait_for_work(struct ring_buffer *rb) {
 	printf("Waiting for work...\n");
 	int err = ring_buffer__poll(rb, -1); /* block until data */
-	printf("[wait_for_work] : Woke up cause of data arrival\n");
+	if (verbose)
+		printf("[wait_for_work] : Woke up cause of data arrival\n");
 	if (err < 0) {
 		fprintf(stderr, "ring_buffer__poll failed: %d\n", err);
 	}
@@ -601,8 +603,10 @@ void wait_for_work(struct ring_buffer *rb) {
 
 static void sched_main_loop(void) {
 	while (!exit_req) {
-		printf("[sched_main_loop]: running main loop\n");
-		fflush(stdout);
+		if (verbose) {
+			printf("[sched_main_loop]: running main loop\n");
+			fflush(stdout);
+		}
 		/*
 		 * Perform the following work in the main user space scheduler
 		 * loop:
