@@ -18,10 +18,11 @@ UEI_DEFINE(uei);
 #define SHARED_DSQ_ID 0
 
 // Maximum amount of tasks enqueued/dispatched between kernel and user-space.
-#define MAX_ENQUEUED_TASKS 4096
+#define MAX_ENQUEUED_TASKS 8192
 
 const volatile s32 usersched_pid;
 u64 nr_user_enqueues;
+u64 nr_failed_enqueues;
 
 /* Number of tasks that are sent for argument retrieval and slice calculation in userspace.
  *
@@ -151,20 +152,26 @@ static void dispatch_user_scheduler(void) {
 }
 
 static void enqueue_task_in_userspace(struct task_struct *p) {
-	DEBUG_PRINTK("%-30s enqueueing task %d in user space", "[enqueue_task_userspace]", p->pid);
 	struct scx_serverless_enqueued_task task = {};
 
 	task.pid = p->pid;
 
-	if (bpf_map_push_elem(&enqueued, &task, 0)) {
-		// If we fail to enqueue the task in user space, put it directly on the global DSQ.
-		DEBUG_PRINTK("%-30s failed to enqueue task %d in user space, putting it on the global DSQ", "[enqueue_task_in_user	space]", p->pid);
-		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
+	if (bpf_map_push_elem(&enqueued, &task, 0) != 0) {
+		// If we fail to enqueue the task in user space, put it on the vtime DSQ and just give it DFL time slice.
+		__sync_fetch_and_add(&nr_failed_enqueues, 1);
+		DEBUG_PRINTK("%-30s failed to enqueue task %d in user space, putting it on the global DSQ (total failed: %llu)", "[enqueue_task_in_userspace]", p->pid, nr_failed_enqueues);
+		u64 vtime = p->scx.dsq_vtime;
+		// Limit the amount of budget that an idling task can accumulate to one slice.
+		if (time_before(vtime, vtime_now - SCX_SLICE_DFL))
+			vtime = vtime_now - SCX_SLICE_DFL;
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime, 0);
 		return;
 	}
-	__sync_fetch_and_add(&nr_user_enqueues, 1);
-	set_usersched_needed();
 
+	__sync_fetch_and_add(&nr_user_enqueues, 1);
+	DEBUG_PRINTK("%-30s task %d enqueued in userspace (total: %llu)", "[enqueue_task_in_userspace]", p->pid, nr_user_enqueues);
+	set_usersched_needed();
+	return;
 }
 
 static void dequeue_tasks_from_userspace(void) {
@@ -172,7 +179,8 @@ static void dequeue_tasks_from_userspace(void) {
 
 	bpf_repeat(MAX_ENQUEUED_TASKS) {
 		struct task_struct *p;
-		if (bpf_map_pop_elem(&dispatched, &u_task)) {
+
+		if (bpf_map_pop_elem(&dispatched, &u_task) != 0) {
 			break;
 		}
 		/*
@@ -187,10 +195,19 @@ static void dequeue_tasks_from_userspace(void) {
 		}
 
 		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+
+		u64 vtime = p->scx.dsq_vtime;
+		u64 slice = tctx ? tctx->slice : SCX_SLICE_DFL;
+		p->scx.slice = slice;
+
+		// Limit the amount of budget that an idling task can accumulate to one slice.
+		if (time_before(vtime, vtime_now - slice))
+			vtime = vtime_now - slice;
+
 		if (!tctx) {
 			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[dequeue_tasks_from_userspace]", p->pid);
 			// Don't have a task context, use default slice, also don't create one, other paths will just use the default slice
-			scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, 0);
+			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
 			bpf_task_release(p);
 			continue;
 		}
@@ -203,7 +220,7 @@ static void dequeue_tasks_from_userspace(void) {
 		}
 
 		tctx->slice = u_task.slice;
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime_now, 0);
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
 		DEBUG_PRINTK("%-30s task %d uspace --> k, task_slice %llu", "[dequeue_tasks_from_userspace]", p->pid, tctx->slice);
 		bpf_task_release(p);
 	}
@@ -239,13 +256,22 @@ s32 BPF_STRUCT_OPS(serverless_select_cpu, struct task_struct *p, s32 prev_cpu, u
 	if (is_idle) {
 		// Get task context to use correct slice
 		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+
+		u64 vtime = p->scx.dsq_vtime;
+		u64 slice = tctx ? tctx->slice : SCX_SLICE_DFL;
+		p->scx.slice = slice;
+
 		if (!tctx) {
 			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_select_cpu]", p->pid);
-			scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime, 0);
 			return cpu;
 		}
-		DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, tctx->slice);
-		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, tctx->slice, 0);
+		// Limit the amount of budget that an idling task can accumulate to one slice.
+		if (time_before(vtime, vtime_now - slice))
+			vtime = vtime_now - slice;
+
+		DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, slice);
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, 0);
 	}
 	return cpu;
 }
@@ -259,22 +285,24 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 	}
 	struct task_ctx *tctx;
 	tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
+
+	u64 vtime = p->scx.dsq_vtime;
+	u64 slice = tctx ? tctx->slice : SCX_SLICE_DFL;
+	p->scx.slice = slice;
+
+	// Limit the amount of budget that an idling task can accumulate to one slice.
+	if (time_before(vtime, vtime_now - slice))
+		vtime = vtime_now - slice;
+
 	if (!tctx) {
 		DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_enqueue]", p->pid);
-		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime_now, enq_flags);
 		return 0;
 	}
 
-	u64 vtime = p->scx.dsq_vtime;
-	p->scx.slice = tctx->slice;
-	/*
-	* Limit the amount of budget that an idling task can accumulate
-	* to one slice.
-	*/
-	if (time_before(vtime, vtime_now - tctx->slice))
-		vtime = vtime_now - tctx->slice;
 
-	scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, enq_flags);
+
+	scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, enq_flags);
 	DEBUG_PRINTK("%-30s task %d enqueued ,ran_time %llu, task_slice %llu", "[serverless_enqueue]", p->pid, vtime, tctx->slice);
 
 	return 0;
@@ -308,7 +336,7 @@ int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
  * work to do.
  */
 void BPF_STRUCT_OPS(serverless_update_idle, s32 cpu, bool idle) {
-	DEBUG_PRINTK("%-30s cpu %d %s idle", "[serverless_update_idle]", cpu, idle?"entering":"exiting");
+	// DEBUG_PRINTK("%-30s cpu %d %s idle", "[serverless_update_idle]", cpu, idle?"entering":"exiting");
 	/*
 	 * Don't do anything if we exit from and idle state, a CPU owner will
 	 * be assigned in .running().

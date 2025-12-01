@@ -14,6 +14,10 @@
 
 #include <scx/common.h>
 #include "scx_serverless.h"
+
+/* Debug printf macro - only prints when verbose mode is enabled */
+#define dprintf(fmt, ...) \
+	do { if (verbose) printf(fmt, ##__VA_ARGS__); } while (0)
 #ifdef DEBUG_BUILD
 #include "scx_serverless_debug.bpf.skel.h"
 #define SKEL_NAME scx_serverless_debug
@@ -78,19 +82,19 @@ struct fib_slice_mapping {
 
 // Run to exhaustion the small ones using 1 signifying SCX_SLICE_INF (virtually making it FIFO)
 static const struct fib_slice_mapping fib_slice_map[] = {
-	{24, 1},       //			SCX_SLICE_DFL
-	{25, 1},       //			SCX_SLICE_DFL
-	{26, 1},       //			SCX_SLICE_DFL
-	{27, 1},       //			SCX_SLICE_DFL
-	{28, 1},       //			SCX_SLICE_DFL
-	{29, 1},       //			SCX_SLICE_DFL
-	{30, 1},       //			SCX_SLICE_DFL
-	{31, 1},       //			SCX_SLICE_DFL
-	{32, 1},      // 21 ms -> 21000000 ns
-	{33, 1},      // 31 ms -> 31000000 ns
-	{34, 1},      // 47 ms -> 47000000 ns
-	{35, 1},      // 72 ms -> 72000000 ns
-	{36, 1},     // 113 ms -> 113000000 ns
+	{24, 0},       //			SCX_SLICE_DFL
+	{25, 0},       //			SCX_SLICE_DFL
+	{26, 0},       //			SCX_SLICE_DFL
+	{27, 0},       //			SCX_SLICE_DFL
+	{28, 0},       //			SCX_SLICE_DFL
+	{29, 0},       //			SCX_SLICE_DFL
+	{30, 0},       //			SCX_SLICE_DFL
+	{31, 0},       //			SCX_SLICE_DFL
+	{32, 0},      // 21 ms -> 21000000 ns
+	{33, 0},      // 31 ms -> 31000000 ns
+	{34, 0},      // 47 ms -> 47000000 ns
+	{35, 0},      // 72 ms -> 72000000 ns
+	{36, 0},     // 113 ms -> 113000000 ns
 	{37, 0},     // 179 ms -> 179000000 ns
 	{38, 0},     // 286 ms -> 286000000 ns
 	{39, 0},     // 459 ms -> 459000000 ns
@@ -132,7 +136,7 @@ static struct scx_serverless *skel;
 static struct bpf_link *ops_link;
 
 /* Stats collected in user space. */
-static __u64 nr_user_to_kernel_enqueues, nr_slice_dispatches, nr_slice_failed;
+static __u64 nr_kernel_to_user_enqueues, nr_dispatches, nr_dispatches_failed, failed_to_get_cmdline;
 
 /* Number of tasks currently enqueued. */
 static __u64 nr_curr_enqueued;
@@ -219,18 +223,15 @@ static __u32 task_pid(const struct enqueued_task *task) {
 static int dispatch_task(struct scx_serverless_dispatched_task d_task) {
 	int err;
 
-	if (verbose)
-		printf("	[dispatch_task] : called for PID %d with slice %llu\n", d_task.pid, d_task.slice);
+	dprintf("	[dispatch_task] : called for PID %d with slice %llu\n", d_task.pid, d_task.slice);
 
 	err = bpf_map_update_elem(dispatched_fd, NULL, &d_task, 0);
-	if (err) {
-		nr_slice_failed++;
-		if (verbose)
-			printf("	[dispatch_task] : failed for PID %d: %s\n", d_task.pid, strerror(-err));
+	if (err != 0) {
+		nr_dispatches_failed++;
+		dprintf("	[dispatch_task] : failed for PID %d: %s\n", d_task.pid, strerror(-err));
 	} else {
-		nr_slice_dispatches++;
-		if (verbose)
-			printf("	[dispatch_task] : succeeded for PID %d\n", d_task.pid);
+		nr_dispatches++;
+		dprintf("	[dispatch_task] : succeeded for PID %d\n", d_task.pid);
 	}
 
 	return err;
@@ -238,8 +239,7 @@ static int dispatch_task(struct scx_serverless_dispatched_task d_task) {
 
 static struct enqueued_task *get_enqueued_task(__s32 pid) {
 	if (pid >= pid_max) {
-		if (verbose)
-			printf("	[get_enqueued_task]: PID %d >= pid_max %d, returning NULL\n", pid, pid_max);
+		dprintf("	[get_enqueued_task]: PID %d >= pid_max %d, returning NULL\n", pid, pid_max);
 		return NULL;
 	}
 
@@ -250,24 +250,22 @@ static struct enqueued_task *get_enqueued_task(__s32 pid) {
 int read_cmdline(pid_t pid, char *buf, size_t size) {
 	char path[64];
 
-	if (verbose)
-		printf("	[read_cmdline] : called for PID %d\n", pid);
+	dprintf("	[read_cmdline] : called for PID %d\n", pid);
 
 	snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
 
 	FILE *f = fopen(path, "r");
 	if (!f) {
-		if (verbose)
-			printf("		[read_cmdline] : failed to open %s\n", path);
-		return -1;
+		dprintf("		[read_cmdline] : failed to open %s\n", path);
+		goto error;
 	}
 
 	size_t len = fread(buf, 1, size - 1, f);
 	fclose(f);
 
 	if (len == 0) {
-			printf("		[read_cmdline] : Fail, read 0 bytes for PID %d\n", pid);
-		return -1;
+		dprintf("		[read_cmdline] : Fail, read 0 bytes for PID %d\n", pid);
+		goto error;
 	}
 
 	// Replace NULs with spaces for printing
@@ -277,53 +275,48 @@ int read_cmdline(pid_t pid, char *buf, size_t size) {
 	}
 	buf[len] = '\0';
 
-	if (verbose)
-		printf("		[read_cmdline] : success for PID %d: '%s'\n", pid, buf);
+	dprintf("		[read_cmdline] : success for PID %d: '%s'\n", pid, buf);
 
 	return 0;
+
+	error:
+		failed_to_get_cmdline++;
+		return -1;
 }
 
 // Get the slice value for a fibonacci argument
 static __u64 get_slice_for_fib_arg(int fib_arg) {
-	if (verbose)
-		printf("	[get_slice_for_fib_arg] : called with arg %d\n", fib_arg);
+	dprintf("	[get_slice_for_fib_arg] : called with arg %d\n", fib_arg);
 
 	if (fib_arg < FIB_ARG_MIN || fib_arg > FIB_ARG_MAX) {
-		if (verbose)
-			printf("		[get_slice_for_fib_arg] : arg %d out of range [%d, %d], returning 0\n",
-			       fib_arg, FIB_ARG_MIN, FIB_ARG_MAX);
+		dprintf("		[get_slice_for_fib_arg] : arg %d out of range [%d, %d], returning 0\n", fib_arg, FIB_ARG_MIN, FIB_ARG_MAX);
 		return 0;
 	}
 
 	// Direct array access: fib_arg 29 -> index 0, fib_arg 30 -> index 1, etc.
 	__u64 slice = fib_slice_map[fib_arg - FIB_ARG_MIN].runtime_ns;
-	if (verbose)
-		printf("		[get_slice_for_fib_arg] : returning %llu ns (~%llu ms) for arg %d\n", slice, slice / 1000000ULL, fib_arg);
+	dprintf("		[get_slice_for_fib_arg] : returning %llu ns (~%llu ms) for arg %d\n", slice, slice / 1000000ULL, fib_arg);
 	return slice;
 }
 
 // Parse fibonacci argument from cmdline string
 // Expected format: "/root/loadgen/payload/launch_function.out 42"
 static int parse_fib_arg_from_cmdline(const char *cmdline) {
-	if (verbose)
-		printf("	[parse_fib_arg_from_cmdline] : called with cmdline '%s'\n", cmdline);
+	dprintf("	[parse_fib_arg_from_cmdline] : called with cmdline '%s'\n", cmdline);
 
 	char *last_space = strrchr(cmdline, ' ');
 	if (!last_space) {
-		if (verbose)
-			printf("		[parse_fib_arg_from_cmdline] : no space found in cmdline\n");
+		dprintf("		[parse_fib_arg_from_cmdline] : no space found in cmdline\n");
 		return -1; // No space found, invalid format
 	}
 
 	int arg = atoi(last_space + 1);
 	if (arg <= 0) {
-		if (verbose)
-			printf("		[parse_fib_arg_from_cmdline] : invalid arg %d\n", arg);
+		dprintf("		[parse_fib_arg_from_cmdline] : invalid arg %d\n", arg);
 		return -1; // Invalid argument
 	}
 
-	if (verbose)
-		printf("		[parse_fib_arg_from_cmdline] : parsed arg %d\n", arg);
+	dprintf("		[parse_fib_arg_from_cmdline] : parsed arg %d\n", arg);
 	return arg;
 }
 
@@ -333,9 +326,9 @@ static void print_slice_mappings(void) {
 	printf("============================================\n");
 	for (int i = 0; i < FIB_SLICE_MAP_SIZE; i++) {
 		printf("Fib arg %2d -> %7lu ns (%6.3f ms)\n",
-		       fib_slice_map[i].fib_arg,
-		       fib_slice_map[i].runtime_ns,
-		       fib_slice_map[i].runtime_ns / 1e6);
+			   fib_slice_map[i].fib_arg,
+			   fib_slice_map[i].runtime_ns,
+			   fib_slice_map[i].runtime_ns / 1e6);
 	}
 	printf("Default slice for unknown args: 0 ns (mses SCX_SLICE_DFL in BPF backend)\n");
 }
@@ -345,17 +338,15 @@ static int local_enqueue_task(const struct scx_serverless_enqueued_task *bpf_tas
 	struct enqueued_task *curr;
 	__u64 slice = 0; // Default slice value, so that BPF backend mses SCX_SLICE_DFL
 
-	if (verbose)
-		printf("	[local_enqueue_task] : called for PID %d\n", bpf_task->pid);
+	dprintf("	[local_enqueue_task] : called for PID %d\n", bpf_task->pid);
 
 	curr = get_enqueued_task(bpf_task->pid);
 	if (!curr) {
-		if (verbose)
-			printf("		[local_enqueue_task] : failed to get task for PID %d\n", bpf_task->pid);
+		dprintf("		[local_enqueue_task] : failed to get task for PID %d\n", bpf_task->pid);
 		return ENOENT;
 	}
 
-	nr_user_to_kernel_enqueues++;
+	nr_kernel_to_user_enqueues++;
 	nr_curr_enqueued++;
 
 	// Get the cmdline of the task based on its PID.
@@ -368,13 +359,13 @@ static int local_enqueue_task(const struct scx_serverless_enqueued_task *bpf_tas
 	// Parse fibonacci argument from cmdline
 	int fib_arg = parse_fib_arg_from_cmdline(task_arg);
 	if (fib_arg < 0	) {
-			printf("		[local_enqueue_task] : invalid cmdline '%s', msing default slice\n", task_arg);
-			goto enqueue;
-		}
+		dprintf("		[local_enqueue_task] : invalid cmdline '%s', msing default slice\n", task_arg);
+		goto enqueue;
+	}
 
 	slice = get_slice_for_fib_arg(fib_arg);
 	nr_tasks_assigned_slice++;
-	printf("		[local_enqueue_task] : Task %d (fib arg %d): assigned slice %llu ms (total tasks assigned: %llu)\n", bpf_task->pid, fib_arg, slice, nr_tasks_assigned_slice);
+	dprintf("		[local_enqueue_task] : Task %d (fib arg %d): assigned slice %llu ms (total tasks assigned: %llu)\n", bpf_task->pid, fib_arg, slice, nr_tasks_assigned_slice);
 
 	// Set the calculated slice in the task
 	enqueue:
@@ -382,14 +373,12 @@ static int local_enqueue_task(const struct scx_serverless_enqueued_task *bpf_tas
 
 	if (STAILQ_EMPTY(&dispatch_head)) {
 		STAILQ_INSERT_HEAD(&dispatch_head, curr, entries);
-		if (verbose)
-			printf("		[local_enqueue_task] : inserted task %d at head of dispatch queue\n", bpf_task->pid);
+		dprintf("		[local_enqueue_task] : inserted task %d at head of dispatch queue\n", bpf_task->pid);
 		return 0;
 	}
 
 	STAILQ_INSERT_TAIL(&dispatch_head, curr, entries);
-	if (verbose)
-		printf("		[local_enqueue_task] : inserted task %d at tail of dispatch queue\n", bpf_task->pid);
+	dprintf("		[local_enqueue_task] : inserted task %d at tail of dispatch queue\n", bpf_task->pid);
 
 	return 0;
 }
@@ -401,11 +390,10 @@ static void drain_enqueued_map(void) {
 		struct scx_serverless_enqueued_task task;
 		int err;
 
-		if (bpf_map_lookup_and_delete_elem(enqueued_fd, NULL, &task)) {
+		if (bpf_map_lookup_and_delete_elem(enqueued_fd, NULL, &task) != 0) {
 			skel->bss->nr_userspace_queued = 0;
 			skel->bss->nr_userspace_scheduled = nr_curr_enqueued;
-			if (verbose)
-				printf("	[drain_enqueued_map] : completed, no more tasks\n");
+			dprintf("	[drain_enqueued_map] : completed, no more tasks\n");
 			return;
 		}
 
@@ -415,16 +403,14 @@ static void drain_enqueued_map(void) {
 			exit_req = 1;
 			return;
 		}
-		if (verbose)
-			printf("	[drain_enqueued_map] : successfully enqueued task %d\n", task.pid);
+		dprintf("	[drain_enqueued_map] : successfully enqueued task %d\n", task.pid);
 	}
 }
 
 static void dispatch_batch(void) {
 	__u32 i;
 
-	if (verbose)
-		printf("	[dispatch_batch] : called with batch_size %d\n", batch_size);
+	dprintf("	[dispatch_batch] : called with batch_size %d\n", batch_size);
 
 	for (i = 0; i < batch_size; i++) {
 		struct enqueued_task *task;
@@ -433,8 +419,7 @@ static void dispatch_batch(void) {
 
 		task = STAILQ_FIRST(&dispatch_head);
 		if (!task) {
-			if (verbose)
-				printf("	[dispatch_batch] : no more tasks, dispatched %d tasks\n", i);
+			dprintf("	[dispatch_batch] : no more tasks, dispatched %d tasks\n", i);
 			break;
 		}
 
@@ -450,25 +435,25 @@ static void dispatch_batch(void) {
 		}
 		STAILQ_REMOVE(&dispatch_head, task, enqueued_task, entries);
 		nr_curr_enqueued--;
-		if (verbose)
-			printf("	[dispatch_batch] : successfully dispatched task %d with slice %llu ms\n", pid, d_task.slice);
+		dprintf("	[dispatch_batch] : successfully dispatched task %d with slice %llu ms\n", pid, d_task.slice);
 	}
 	skel->bss->nr_userspace_scheduled = nr_curr_enqueued;
-	if (verbose)
-		printf("	[dispatch_batch] : completed, %lld tasks remaining\n", nr_curr_enqueued);
+	dprintf("	[dispatch_batch] : completed, %lld tasks remaining\n", nr_curr_enqueued);
 }
 
 static void *run_stats_printer(void *arg) {
 	printf("	[run_stats_printer] : thread started\n");
 
 	while (!exit_req) {
-		// print the contents of the enqueued_fd BPF map
-		struct scx_serverless_enqueued_task task;
-		while (bpf_map_lookup_and_delete_elem(enqueued_fd, NULL, &task)) {
-			printf("	[run_stats_printer] : enqueued_fd: task %d\n", task.pid);
-			fflush(stdout);
-			sleep(1);
-		}
+		printf("--------------------------------\n");
+		printf("[stats_printer] : Kernel to user enqueues: %llu\n", nr_kernel_to_user_enqueues);
+		printf("[stats_printer] : User to kernel dispatches: %llu\n", nr_dispatches);
+		printf("[stats_printer] : Failed dispatches: %llu\n", nr_dispatches_failed);
+		printf("[stats_printer] : Currently enqueued: %llu\n", nr_curr_enqueued);
+		printf("[stats_printer] : Failed to get cmdline: %llu\n", failed_to_get_cmdline);
+		printf("[stats_printer] : Tasks assigned slice: %llu\n", nr_tasks_assigned_slice);
+		fflush(stdout);
+		sleep(1);
 	}
 	return NULL;
 }
@@ -481,8 +466,7 @@ static int __attribute__((unused))spawn_stats_thread(void) {
 
 static int handle_wake_msg(void *ctx, void *data, size_t len) {
 	struct wake_msg *msg = data;
-	if (verbose)
-		printf("Got wakeup, value=%llu\n", msg->value);
+	dprintf("Got wakeup, value=%llu\n", msg->value);
 	return 0;
 }
 
@@ -567,7 +551,7 @@ static void bootstrap(char *comm) {
 
 	printf("bootstrap: got enqueued_fd=%d, dispatched_fd=%d\n", enqueued_fd, dispatched_fd);
 
-	// SCX_BUG_ON(spawn_stats_thread(), "Failed to spawn stats thread");
+	SCX_BUG_ON(spawn_stats_thread(), "Failed to spawn stats thread");
 	rb = init_ring_buffer();
 
 #ifdef DEBUG_BUILD
@@ -592,10 +576,9 @@ static void bootstrap(char *comm) {
 }
 
 void wait_for_work(struct ring_buffer *rb) {
-	printf("Waiting for work...\n");
+	dprintf("Waiting for work...\n");
 	int err = ring_buffer__poll(rb, -1); /* block until data */
-	if (verbose)
-		printf("[wait_for_work] : Woke up cause of data arrival\n");
+	dprintf("[wait_for_work] : Woke up cause of data arrival\n");
 	if (err < 0) {
 		fprintf(stderr, "ring_buffer__poll failed: %d\n", err);
 	}
@@ -603,10 +586,9 @@ void wait_for_work(struct ring_buffer *rb) {
 
 static void sched_main_loop(void) {
 	while (!exit_req) {
-		if (verbose) {
-			printf("[sched_main_loop]: running main loop\n");
+		dprintf("[sched_main_loop]: running main loop\n");
+		if (verbose)
 			fflush(stdout);
-		}
 		/*
 		 * Perform the following work in the main user space scheduler
 		 * loop:
