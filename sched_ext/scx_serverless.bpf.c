@@ -18,7 +18,7 @@ UEI_DEFINE(uei);
 #define SHARED_DSQ_ID 0
 
 // Maximum amount of tasks enqueued/dispatched between kernel and user-space.
-#define MAX_ENQUEUED_TASKS 8192
+#define MAX_ENQUEUED_TASKS 4096
 
 const volatile s32 usersched_pid;
 u64 nr_user_enqueues;
@@ -171,7 +171,6 @@ static void enqueue_task_in_userspace(struct task_struct *p) {
 	__sync_fetch_and_add(&nr_user_enqueues, 1);
 	DEBUG_PRINTK("%-30s task %d enqueued in userspace (total: %llu)", "[enqueue_task_in_userspace]", p->pid, nr_user_enqueues);
 	set_usersched_needed();
-	return;
 }
 
 static void dequeue_tasks_from_userspace(void) {
