@@ -1,5 +1,4 @@
 #include <scx/common.bpf.h>
-#include "scx_serverless.h"
 
 char _license[] SEC("license") = "GPL";
 
@@ -11,62 +10,55 @@ char _license[] SEC("license") = "GPL";
 #endif
 
 static u64 vtime_now;
+volatile u64 nr_enabled;
+volatile u64 nr_disabled;
 UEI_DEFINE(uei);
 
 // The DSQ ID for the shared queue. We use because the built-in DSQs cannot be
 // used as priority queues.
 #define SHARED_DSQ_ID 0
 
-// Maximum amount of tasks enqueued/dispatched between kernel and user-space.
+// Fibonacci argument to slice mapping
+#define FIB_ARG_MIN 24
+#define FIB_ARG_MAX 46
+#define MAX_CMDLINE_LEN 64
 #define MAX_ENQUEUED_TASKS 4096
 
+// Slice mapping table: fib_arg -> slice in nanoseconds
+// Index = fib_arg - FIB_ARG_MIN
+// Values:
+//   - SCX_SLICE_DFL (0) for default slice
+//   - SCX_SLICE_INF (1) for infinite slice
+static const u64 fib_slice_map[] = {
+	1,       // fib 24 -> SCX_SLICE_DFL
+	1,       // fib 25 -> SCX_SLICE_DFL
+	1,       // fib 26 -> SCX_SLICE_DFL
+	1,       // fib 27 -> SCX_SLICE_DFL
+	1,       // fib 28 -> SCX_SLICE_DFL
+	1,       // fib 29 -> SCX_SLICE_DFL
+	1,       // fib 30 -> SCX_SLICE_DFL
+	1,       // fib 31 -> SCX_SLICE_DFL
+	1,       // fib 32 -> SCX_SLICE_DFL
+	1,       // fib 33 -> SCX_SLICE_DFL
+	1,       // fib 34 -> SCX_SLICE_DFL
+	1,       // fib 35 -> SCX_SLICE_DFL
+	0,       // fib 36 -> SCX_SLICE_DFL
+	0,       // fib 37 -> SCX_SLICE_DFL
+	0,       // fib 38 -> SCX_SLICE_DFL
+	0,       // fib 39 -> SCX_SLICE_DFL
+	0,       // fib 40 -> SCX_SLICE_DFL
+	0,       // fib 41 -> SCX_SLICE_DFL
+	0,       // fib 42 -> SCX_SLICE_DFL
+	0,       // fib 43 -> SCX_SLICE_DFL
+	0,       // fib 44 -> SCX_SLICE_DFL
+	0,       // fib 45 -> SCX_SLICE_DFL
+	0,       // fib 46 -> SCX_SLICE_DFL
+	// Durations in miniseconds for the fibonacci arguments
+	// fib      = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,  36,  37,  38,  39,  40,  40,   41,   42,   43,   44,   45,    46]
+	// dur_list = [ 4,  5,  5,  6,  7,  8, 11, 15, 21, 31, 47, 72, 113, 179, 286, 459, 740, 739, 1225, 1945, 3192, 5207, 8247, 13186]
+};
+
 const volatile s32 usersched_pid;
-u64 nr_user_enqueues;
-u64 nr_failed_enqueues;
-
-/* Number of tasks that are sent for argument retrieval and slice calculation in userspace.
- *
- * This number is incremented by the BPF component when a task is enabled and sent to the
- * user-space scheduler and it must be decremented by the user-space scheduler
- * when a task is consumed.
- */
-volatile u64 nr_userspace_queued;
-
-/*
- * Number of tasks that are waiting for scheduling.
- *
- * This number must be updated by the user-space scheduler to keep track if
- * there is still some scheduling work to do.
- */
-volatile u64 nr_userspace_scheduled;
-
-/*
- * The map containing tasks that are enqueued in user space from the kernel.
- *
- * This map is drained by the user space scheduler.
- */
-struct {
-	__uint(type, BPF_MAP_TYPE_QUEUE);
-	__uint(max_entries, MAX_ENQUEUED_TASKS);
-	__type(value, struct scx_serverless_enqueued_task);
-} enqueued SEC(".maps");
-
-/*
- * The map containing tasks that are dispatched to the kernel from user space.
- *
- * Drained by the kernel in serverless_dispatch().
- */
-struct {
-	__uint(type, BPF_MAP_TYPE_QUEUE);
-	__uint(max_entries, MAX_ENQUEUED_TASKS);
-	__type(value, struct scx_serverless_dispatched_task);
-} dispatched SEC(".maps");
-
-/* Map holding file descriptor to wake up userspace scheduler */
-struct {
-	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 1 << 20);   /* 1 MB buffer */
-} wake_ringbuf SEC(".maps");
 
 /* Per-task scheduling context (slice in nanoseconds)*/
 struct task_ctx {
@@ -82,153 +74,93 @@ struct {
 } task_ctx_stor SEC(".maps");
 
 /*
- * Flag used to wake-up the user-space scheduler.
+ * Get a time slice to a task based on its cmdline argument.
+ * Reads the task's cmdline, extracts the fibonacci argument,
+ * and returns the appropriate slice from the mapping table.
+ *
+ * Returns:
+ *   - Slice in nanoseconds based on fib_arg
+ *   - 0 (SCX_SLICE_DFL) if cmdline parsing fails or arg is out of range
+ *   - 1 (SCX_SLICE_INF) for infinite slice (if configured in mapping)
  */
-static volatile u32 usersched_needed;
+static u64 get_task_slice(struct task_struct *p) {
+	char cmdline[MAX_CMDLINE_LEN];
 
-/*
- * Set user-space scheduler wake-up flag (equivalent to an atomic release
- * operation).
- */
-static void set_usersched_needed(void) {
-	__sync_fetch_and_or(&usersched_needed, 1);
-}
 
-/*
- * Check and clear user-space scheduler wake-up flag (equivalent to an atomic
- * acquire operation).
- */
-static bool test_and_clear_usersched_needed(void) {
-	return __sync_fetch_and_and(&usersched_needed, 0) == 1;
-}
-
-static bool is_usersched_task(const struct task_struct *p) {
-	return p->pid == usersched_pid;
-}
-
-static struct task_struct *usersched_task(void) {
-	struct task_struct *p;
-
-	p = bpf_task_from_pid(usersched_pid);
-	/*
-	 * Should never happen -- the usersched task should always be managed
-	 * by sched_ext.
-	 */
-	if (!p)
-		scx_bpf_error("Failed to find usersched task %d", usersched_pid);
-
-	return p;
-}
-
-static void send_wake_msg(void) {
-	struct wake_msg *msg;
-
-	msg = bpf_ringbuf_reserve(&wake_ringbuf, sizeof(*msg), 0);
-	if (!msg) {
-		scx_bpf_error("failed to reserve ringbuf slot\n");
-		return;
+	//Get cmdline
+	int len = p->mm->arg_end - p->mm->arg_start;
+	if(len <= 0 || len >= MAX_CMDLINE_LEN) {
+		DEBUG_PRINTK("invalid cmdline length %d for process %d", len, p->pid);
+		return SCX_SLICE_DFL;
 	}
 
-	// This is just a dummy value for the message, if more than one message types was to be supported,
-	// we could use this field to differentiate them. For the time being the value set is just useless so we microptimize it away
-	// (1 assembly instruction saved :))
-	// msg->value = 1;
-	bpf_ringbuf_submit(msg, 0);
+	bpf_probe_read_user(cmdline, len, (void *)p->mm->arg_start);
 
-	DEBUG_PRINTK("%-30s wakeup sent to userspace", "[send_wake_msg]");
+	// Clamp len for verifier safety
+	if (len < 0 || len >= MAX_CMDLINE_LEN)
+		len = MAX_CMDLINE_LEN - 1;
 
-}
-
-static void dispatch_user_scheduler(void) {
-	struct task_struct *p;
-
-	p = usersched_task();
-	if (p) {
-		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_INF, 0);
-		bpf_task_release(p);
+	// Replace NULL bytes with spaces (except the last one)
+	for (int i = 0; i < len - 1 && i < MAX_CMDLINE_LEN - 1; i++) {
+		if (cmdline[i] == '\0') {
+			cmdline[i] = ' ';
+		}
 	}
+	// Ensure null termination - bounds check for verifier
+	if (len > 0 && len < MAX_CMDLINE_LEN)
+		cmdline[len] = '\0';
 
-	send_wake_msg();
-}
+	// cmdline is something like "./run_with_sched_ext ./launch_function.out 26"
+	// We need to extract the last argument as the fib_arg
 
-static void enqueue_task_in_userspace(struct task_struct *p) {
-	struct scx_serverless_enqueued_task task = {};
+	int fib_arg = 0;
+	int i = 0;
 
-	task.pid = p->pid;
+	// Find end of string
+	while (i < MAX_CMDLINE_LEN && cmdline[i] != '\0')
+		i++;
 
-	if (bpf_map_push_elem(&enqueued, &task, 0) != 0) {
-		// If we fail to enqueue the task in user space, put it on the vtime DSQ and just give it DFL time slice.
-		__sync_fetch_and_add(&nr_failed_enqueues, 1);
-		DEBUG_PRINTK("%-30s failed to enqueue task %d in user space, putting it on the global DSQ (total failed: %llu)", "[enqueue_task_in_userspace]", p->pid, nr_failed_enqueues);
-		u64 vtime = p->scx.dsq_vtime;
-		// Limit the amount of budget that an idling task can accumulate to one slice.
-		if (time_before(vtime, vtime_now - SCX_SLICE_DFL))
-			vtime = vtime_now - SCX_SLICE_DFL;
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime, 0);
-		return;
-	}
+	// Walk backwards to skip trailing spaces
+	int end = i - 1;
+	while (end >= 0 && cmdline[end] == ' ')
+		end--;
 
-	__sync_fetch_and_add(&nr_user_enqueues, 1);
-	DEBUG_PRINTK("%-30s task %d enqueued in userspace (total: %llu)", "[enqueue_task_in_userspace]", p->pid, nr_user_enqueues);
-	set_usersched_needed();
-}
+	// Find start of last token
+	int start = end;
+	while (start >= 0 && cmdline[start] != ' ')
+		start--;
 
-static void dequeue_tasks_from_userspace(void) {
-	struct scx_serverless_dispatched_task u_task;
+	// Move to first digit of the token
+	start++;
 
-	bpf_repeat(MAX_ENQUEUED_TASKS) {
-		struct task_struct *p;
-
-		if (bpf_map_pop_elem(&dispatched, &u_task) != 0) {
+	// Very simple atoi-like parse (no signs, no overflow concerns)
+	for (int j = start; j <= end; j++) {
+		char c = cmdline[j];
+		if (c >= '0' && c <= '9') {
+			fib_arg = fib_arg * 10 + (c - '0');
+		} else {
+			// non-numeric → stop
 			break;
 		}
-		/*
-		 * The task could have exited by the time we get around to
-		 * dispatching it. Treat this as a normal occurrence, and simply
-		 * move onto the next iteration.
-		 */
-		p = bpf_task_from_pid(u_task.pid);
-		if (!p) {
-			DEBUG_PRINTK("%-30s failed to find task %d, skipping", "[dequeue_tasks_from_userspace]", u_task.pid);
-			continue;
-		}
-
-		struct task_ctx *tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
-
-		u64 vtime = p->scx.dsq_vtime;
-		u64 slice = tctx ? tctx->slice : SCX_SLICE_DFL;
-		p->scx.slice = slice;
-
-		// Limit the amount of budget that an idling task can accumulate to one slice.
-		if (time_before(vtime, vtime_now - slice))
-			vtime = vtime_now - slice;
-
-		if (!tctx) {
-			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[dequeue_tasks_from_userspace]", p->pid);
-			// Don't have a task context, use default slice, also don't create one, other paths will just use the default slice
-			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
-			bpf_task_release(p);
-			continue;
-		}
-
-		// If the slice is zero, we use the default slice value.
-		// If the slice is one, we use infinite slice.
-		if (u_task.slice <= 1) {
-			u_task.slice = (u_task.slice == 0) ? SCX_SLICE_DFL : SCX_SLICE_INF;
-			DEBUG_PRINTK("%-30s task %d has %s slice", "[dequeue_tasks_from_userspace]", p->pid, u_task.slice == SCX_SLICE_INF ? "infinite" : "default");
-		}
-
-		tctx->slice = u_task.slice;
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
-		DEBUG_PRINTK("%-30s task %d uspace --> k, task_slice %llu", "[dequeue_tasks_from_userspace]", p->pid, tctx->slice);
-		bpf_task_release(p);
 	}
+
+	u64 slice = SCX_SLICE_DFL;
+
+	// Make sure fib_arg is in valid range
+	if (fib_arg >= FIB_ARG_MIN && fib_arg <= FIB_ARG_MAX) {
+		slice = fib_slice_map[fib_arg - FIB_ARG_MIN];
+	} else {
+		DEBUG_PRINTK("fib_arg %d out of range [%d, %d], using default slice",
+					fib_arg, FIB_ARG_MIN, FIB_ARG_MAX);
+	}
+
+	DEBUG_PRINTK("Task %d cmdline: '%s', fib_arg: %d, assigned slice: %llu ns", p->pid, cmdline, fib_arg, slice);
+	return slice;
 }
 
-int create_task_ctx(struct task_struct *p) {
-	// Use default slice when creating task context
+int create_task_ctx(struct task_struct *p, u64 slice) {
 	struct task_ctx tctx_init = {
-		.slice = SCX_SLICE_DFL,
+		.slice = slice,
 	};
 
 	if (!bpf_task_storage_get(&task_ctx_stor, p, &tctx_init, BPF_LOCAL_STORAGE_GET_F_CREATE)) {
@@ -278,10 +210,6 @@ s32 BPF_STRUCT_OPS(serverless_select_cpu, struct task_struct *p, s32 prev_cpu, u
 s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 	DEBUG_PRINTK("%-30s enqueueing task %d, associated_cpu %d, enq_flags 0x%llx",	"[serverless_enqueue]", p->pid,	scx_bpf_task_cpu(p), (unsigned long long)enq_flags);
 
-	if(is_usersched_task(p)) {
-		scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_INF, enq_flags);
-		return 0;
-	}
 	struct task_ctx *tctx;
 	tctx = bpf_task_storage_get(&task_ctx_stor, p, 0, 0);
 
@@ -308,12 +236,8 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 }
 
 int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
-	if (test_and_clear_usersched_needed()) {
-		dispatch_user_scheduler();
-	}
-
 	// Dequeue tasks that are sent from userspace through *dispatched* map
-	dequeue_tasks_from_userspace();
+	// dequeue_tasks_from_userspace();
 
 	// Move tasks from the shared DSQ to the local DSQ, if any.
 	int nr_queued = scx_bpf_dsq_nr_queued(SHARED_DSQ_ID);
@@ -322,60 +246,8 @@ int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
 		if(!scx_bpf_dsq_move_to_local(SHARED_DSQ_ID)) {
 			DEBUG_PRINTK("%-30s failed to move tasks from shared DSQ to local DSQ", "[serverless_dispatch]");
 		}
-		else {
-			DEBUG_PRINTK("%-30s moved task from shared DSQ to local DSQ", "[serverless_dispatch]");
-		}
 	}
 	return 0;
-}
-
-/*
- * A CPU is about to change its idle state. If the CPU is going idle, ensure
- * that the user-space scheduler has a chance to run if there is any remaining
- * work to do.
- */
-void BPF_STRUCT_OPS(serverless_update_idle, s32 cpu, bool idle) {
-	// DEBUG_PRINTK("%-30s cpu %d %s idle", "[serverless_update_idle]", cpu, idle?"entering":"exiting");
-	/*
-	 * Don't do anything if we exit from and idle state, a CPU owner will
-	 * be assigned in .running().
-	 */
-	if (!idle)
-		return;
-	/*
-	 * A CPU is now available, notify the user-space scheduler that tasks
-	 * can be dispatched, if there is at least one task waiting to be
-	 * scheduled, either queued (accounted in nr_userspace_queued) or scheduled
-	 * (accounted in nr_userspace_scheduled).
-	 *
-	 * NOTE: nr_userspace_queued is incremented by the BPF component, more exactly in
-	 * enqueue(), when a task is sent to the user-space scheduler, then
-	 * the scheduler drains the queued tasks (updating nr_userspace_queued) and adds
-	 * them to its internal data structures / state; at this point tasks
-	 * become "scheduled" and the user-space scheduler will take care of
-	 * updating nr_userspace_scheduled accordingly; lastly tasks will be dispatched
-	 * and the user-space scheduler will update nr_userspace_scheduled again.
-	 *
-	 * Checking both counters allows to determine if there is still some
-	 * pending work to do for the scheduler: new tasks have been queued
-	 * since last check, or there are still tasks "queued" or "scheduled"
-	 * since the previous user-space scheduler run. If the counters are
-	 * both zero it is pointless to wake-up the scheduler (even if a CPU
-	 * becomes idle), because there is nothing to do.
-	 *
-	 * Keep in mind that update_idle() doesn't run concurrently with the
-	 * user-space scheduler (that is single-threaded): this function is
-	 * naturally serialized with the user-space scheduler code, therefore
-	 * this check here is also safe from a concurrency perspective.
-	 */
-	if (nr_userspace_queued || nr_userspace_scheduled) {
-		/*
-		 * Kick the CPU to make it immediately ready to accept
-		 * dispatched tasks.
-		 */
-		set_usersched_needed();
-		scx_bpf_kick_cpu(cpu, 0);
-	}
 }
 
 #ifdef DEBUG
@@ -425,11 +297,12 @@ void BPF_STRUCT_OPS(serverless_tick, struct task_struct *p) {
 }
 #endif
 
+// TODO
 int BPF_STRUCT_OPS(serverless_init_task, struct task_struct *p, struct scx_init_task_args *args) {
 	DEBUG_PRINTK("%-30s init task %d", "[serverless_init_task]", p->pid);
 	p->scx.dsq_vtime = vtime_now;
 
-	if (create_task_ctx(p) < 0) {
+	if (create_task_ctx(p, SCX_SLICE_DFL) < 0) {
 		return -ENOMEM;
 	}
 
@@ -443,17 +316,24 @@ int BPF_STRUCT_OPS(serverless_exit_task, struct task_struct *p, struct scx_exit_
 }
 
 int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
+	u64 slice;
 	DEBUG_PRINTK("%-30s enabling task %d", "[serverless_enable]", p->pid);
 	p->scx.dsq_vtime = vtime_now;
 
-	if (create_task_ctx(p) < 0) {
+	slice = get_task_slice(p);
+
+	if (create_task_ctx(p, slice) < 0) {
 		return -ENOMEM;
 	}
 
-	if(!is_usersched_task(p)) {
-		enqueue_task_in_userspace(p);
-	}
+	__sync_fetch_and_add(&nr_enabled, 1);
+	return 0;
+}
 
+int BPF_STRUCT_OPS(serverless_disable, struct task_struct *p) {
+	DEBUG_PRINTK("%-30s disabling task %d", "[serverless_disable]", p->pid);
+	bpf_task_storage_delete(&task_ctx_stor, p);
+	__sync_fetch_and_add(&nr_disabled, 1);
 	return 0;
 }
 
@@ -490,9 +370,9 @@ SCX_OPS_DEFINE(serverless_ops,
 		   .tick			= (void *)serverless_tick,
 #endif
 		   .stopping		= (void *)serverless_stopping,
-		   .update_idle		= (void *)serverless_update_idle,
 		   .init_task		= (void *)serverless_init_task,
 		   .enable			= (void *)serverless_enable,
+		   .disable			= (void *)serverless_disable,
 		   .exit_task		= (void *)serverless_exit_task,
 		   .init			= (void *)serverless_init,
 		   .exit			= (void *)serverless_exit,
