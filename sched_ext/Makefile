@@ -19,10 +19,18 @@ LIBBPF_DIR   = /usr/lib/x86_64-linux-gnu
 
 LDFLAGS = -L$(LIBBPF_DIR) -lbpf -lelf -lz
 
-.PHONY: all clean install debug release
+.PHONY: all clean install debug release run run-debug
 
 # Build both versions by default
 all: release debug
+
+# Build and run the release version
+run: $(BINARY)
+	sudo ./$(BINARY)
+
+# Build and run the debug version
+run-debug: $(BINARY_DEBUG)
+	sudo ./$(BINARY_DEBUG)
 
 # Release version (no debug messages)
 release: $(BINARY)

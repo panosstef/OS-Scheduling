@@ -458,7 +458,11 @@ int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 }
 
 s32 BPF_STRUCT_OPS_SLEEPABLE(serverless_init) {
-	bpf_printk("%-24s Initializing scheduler", "[serverless_init]");
+#ifdef DEBUG
+	bpf_printk("%-24s Initializing scheduler (DEBUG mode)", "[serverless_init]");
+#else
+	bpf_printk("%-24s Initializing scheduler (RELEASE mode)", "[serverless_init]");
+#endif
 
 	if (usersched_pid <= 0) {
 		scx_bpf_error("User scheduler pid uninitialized (%d)", usersched_pid);
