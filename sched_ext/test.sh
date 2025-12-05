@@ -85,7 +85,7 @@ grep "$PID" "$LOG_FILE" > "$FILTERED_LOG" || {
 rm "$LOG_FILE"
 
 # Delete lines before "enabling task" and after "exiting task"
-sed -i '/enabling task/,$!d; /exiting task/q' "$FILTERED_LOG"
+sed -i '/init task/,$!d; /exiting task/q' "$FILTERED_LOG"
 
 # Convert timestamps to offset from first timestamp
 echo "Converting timestamps to offset from first timestamp..."
