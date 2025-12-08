@@ -53,7 +53,7 @@ static const u64 fib_slice_map[] = {
 	0,       // fib 44 -> SCX_SLICE_DFL
 	0,       // fib 45 -> SCX_SLICE_DFL
 	0,       // fib 46 -> SCX_SLICE_DFL
-	// Durations in miniseconds for the fibonacci arguments
+	// Durations in milliseconds for the fibonacci arguments
 	// fib      = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,  36,  37,  38,  39,  40,  40,   41,   42,   43,   44,   45,    46]
 	// dur_list = [ 4,  5,  5,  6,  7,  8, 11, 15, 21, 31, 47, 72, 113, 179, 286, 459, 740, 739, 1225, 1945, 3192, 5207, 8247, 13186]
 };
@@ -85,64 +85,61 @@ struct {
  */
 static u64 get_task_slice(struct task_struct *p) {
 	char cmdline[MAX_CMDLINE_LEN];
+	unsigned long arg_start = p->mm->arg_start;
+	unsigned long arg_end = p->mm->arg_end;
+	unsigned long total_len = arg_end - arg_start;
 
-
-	//Get cmdline
-	int len = p->mm->arg_end - p->mm->arg_start;
-	if(len <= 0 || len >= MAX_CMDLINE_LEN) {
-		DEBUG_PRINTK("invalid cmdline length %d for process %d", len, p->pid);
+	// Sanity check
+	if (total_len <= 0) {
 		return SCX_SLICE_DFL;
 	}
 
-	bpf_probe_read_user(cmdline, len, (void *)p->mm->arg_start);
-
-	// Clamp len for verifier safety
-	if (len < 0 || len >= MAX_CMDLINE_LEN)
-		len = MAX_CMDLINE_LEN - 1;
-
-	// Replace NULL bytes with spaces (except the last one)
-	for (int i = 0; i < len - 1 && i < MAX_CMDLINE_LEN - 1; i++) {
-		if (cmdline[i] == '\0') {
-			cmdline[i] = ' ';
-		}
+	// Read either from start or the last MAX_CMDLINE_LEN bytes
+	unsigned long read_start;
+	if (total_len > MAX_CMDLINE_LEN) {
+		read_start = arg_end - MAX_CMDLINE_LEN;
+		total_len = MAX_CMDLINE_LEN;
+	} else {
+		read_start = arg_start;
 	}
-	// Ensure null termination - bounds check for verifier
-	if (len > 0 && len < MAX_CMDLINE_LEN)
-		cmdline[len] = '\0';
 
-	// cmdline is something like "./run_with_sched_ext ./launch_function.out 26"
-	// We need to extract the last argument as the fib_arg
+	long ret = bpf_probe_read_user(cmdline, MAX_CMDLINE_LEN, (void *)read_start);
+	if (ret < 0) return SCX_SLICE_DFL;
 
-	int fib_arg = 0;
-	int i = 0;
+	// Force null termination at the very end of our buffer
+	cmdline[total_len - 1] = '\0';
 
-	// Find end of string
-	while (i < MAX_CMDLINE_LEN && cmdline[i] != '\0')
-		i++;
+	// Parse fib argument from cmdline
+	// We are looking for the first digit sequence in this window.
+	u64 fib_arg = 0;
+	bool found_digit = false;
 
-	// Walk backwards to skip trailing spaces
-	int end = i - 1;
-	while (end >= 0 && cmdline[end] == ' ')
-		end--;
+	#pragma unroll
+		for (int i = 0; i < MAX_CMDLINE_LEN - 1; i++) {
+			char c = cmdline[i];
 
-	// Find start of last token
-	int start = end;
-	while (start >= 0 && cmdline[start] != ' ')
-		start--;
+			if (i >= total_len - 1) {
+				break;
+			}
 
-	// Move to first digit of the token
-	start++;
+			// Replace null bytes with spaces (making it debug printable for bpf_printk)
+			if (c == '\0') {
+				cmdline[i] = ' ';
+				if (found_digit) break;
+				continue;
+			}
 
-	// Very simple atoi-like parse (no signs, no overflow concerns)
-	for (int j = start; j <= end; j++) {
-		char c = cmdline[j];
-		if (c >= '0' && c <= '9') {
-			fib_arg = fib_arg * 10 + (c - '0');
-		} else {
-			// non-numeric → stop
-			break;
+			if (c >= '0' && c <= '9') {
+				found_digit = true;
+				// CORRECT LOGIC: Shift existing value left by decimal place, add new digit
+				fib_arg = (fib_arg * 10) + (c - '0');
+			} else if (found_digit) {
+				// We hit a delimiter after finding numbers
+				break;
+			}
 		}
-	}
+
+	if (!found_digit) return SCX_SLICE_DFL;
 
 	u64 slice = SCX_SLICE_DFL;
 
@@ -152,9 +149,10 @@ static u64 get_task_slice(struct task_struct *p) {
 	} else {
 		DEBUG_PRINTK("fib_arg %d out of range [%d, %d], using default slice",
 					fib_arg, FIB_ARG_MIN, FIB_ARG_MAX);
+		fib_arg = 0;
 	}
 
-	DEBUG_PRINTK("Task %d cmdline: '%s', fib_arg: %d, assigned slice: %llu ns", p->pid, cmdline, fib_arg, slice);
+	bpf_printk("Task %d cmdline: '%s', fib_arg: %d, assigned slice: %llu ns", p->pid, cmdline, fib_arg, slice);
 	return slice;
 }
 
@@ -297,23 +295,19 @@ void BPF_STRUCT_OPS(serverless_tick, struct task_struct *p) {
 }
 #endif
 
-// TODO
 int BPF_STRUCT_OPS(serverless_init_task, struct task_struct *p, struct scx_init_task_args *args) {
 	DEBUG_PRINTK("%-30s init task %d", "[serverless_init_task]", p->pid);
 	p->scx.dsq_vtime = vtime_now;
 
-	if (create_task_ctx(p, SCX_SLICE_DFL) < 0) {
-		return -ENOMEM;
-	}
-
 	return 0;
 }
 
+#ifdef DEBUG
 int BPF_STRUCT_OPS(serverless_exit_task, struct task_struct *p, struct scx_exit_task_args *args) {
 	DEBUG_PRINTK("%-30s exiting task %d", "[serverless_exit_task]", p->pid);
-	bpf_task_storage_delete(&task_ctx_stor, p);
 	return 0;
 }
+#endif
 
 int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 	u64 slice;
@@ -368,12 +362,12 @@ SCX_OPS_DEFINE(serverless_ops,
 		   .runnable		= (void *)serverless_runnable,
 		   .quiescent		= (void *)serverless_quiescent,
 		   .tick			= (void *)serverless_tick,
+			.exit_task		= (void *)serverless_exit_task,
 #endif
 		   .stopping		= (void *)serverless_stopping,
 		   .init_task		= (void *)serverless_init_task,
 		   .enable			= (void *)serverless_enable,
 		   .disable			= (void *)serverless_disable,
-		   .exit_task		= (void *)serverless_exit_task,
 		   .init			= (void *)serverless_init,
 		   .exit			= (void *)serverless_exit,
 		   .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE | SCX_OPS_SWITCH_PARTIAL,
