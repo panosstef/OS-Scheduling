@@ -429,16 +429,6 @@ int BPF_STRUCT_OPS(serverless_init_task, struct task_struct *p, struct scx_init_
 	DEBUG_PRINTK("%-30s init task %d", "[serverless_init_task]", p->pid);
 	p->scx.dsq_vtime = vtime_now;
 
-	if (create_task_ctx(p) < 0) {
-		return -ENOMEM;
-	}
-
-	return 0;
-}
-
-int BPF_STRUCT_OPS(serverless_exit_task, struct task_struct *p, struct scx_exit_task_args *args) {
-	DEBUG_PRINTK("%-30s exiting task %d", "[serverless_exit_task]", p->pid);
-	bpf_task_storage_delete(&task_ctx_stor, p);
 	return 0;
 }
 
@@ -454,6 +444,12 @@ int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 		enqueue_task_in_userspace(p);
 	}
 
+	return 0;
+}
+
+int BPF_STRUCT_OPS(serverless_disable, struct task_struct *p) {
+	DEBUG_PRINTK("%-30s disabling task %d", "[serverless_disable]", p->pid);
+	bpf_task_storage_delete(&task_ctx_stor, p);
 	return 0;
 }
 
@@ -493,7 +489,7 @@ SCX_OPS_DEFINE(serverless_ops,
 		   .update_idle		= (void *)serverless_update_idle,
 		   .init_task		= (void *)serverless_init_task,
 		   .enable			= (void *)serverless_enable,
-		   .exit_task		= (void *)serverless_exit_task,
+		   .disable		= (void *)serverless_disable,
 		   .init			= (void *)serverless_init,
 		   .exit			= (void *)serverless_exit,
 		   .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE | SCX_OPS_SWITCH_PARTIAL,
