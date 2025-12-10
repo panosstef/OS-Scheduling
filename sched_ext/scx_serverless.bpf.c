@@ -425,13 +425,6 @@ void BPF_STRUCT_OPS(serverless_tick, struct task_struct *p) {
 }
 #endif
 
-int BPF_STRUCT_OPS(serverless_init_task, struct task_struct *p, struct scx_init_task_args *args) {
-	DEBUG_PRINTK("%-30s init task %d", "[serverless_init_task]", p->pid);
-	p->scx.dsq_vtime = vtime_now;
-
-	return 0;
-}
-
 int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 	DEBUG_PRINTK("%-30s enabling task %d", "[serverless_enable]", p->pid);
 	p->scx.dsq_vtime = vtime_now;
@@ -487,7 +480,6 @@ SCX_OPS_DEFINE(serverless_ops,
 #endif
 		   .stopping		= (void *)serverless_stopping,
 		   .update_idle		= (void *)serverless_update_idle,
-		   .init_task		= (void *)serverless_init_task,
 		   .enable			= (void *)serverless_enable,
 		   .disable			= (void *)serverless_disable,
 		   .init			= (void *)serverless_init,
