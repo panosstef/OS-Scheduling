@@ -146,6 +146,14 @@ static u64 get_task_slice(struct task_struct *p) {
 	// Make sure fib_arg is in valid range
 	if (fib_arg >= FIB_ARG_MIN && fib_arg <= FIB_ARG_MAX) {
 		slice = fib_slice_map[fib_arg - FIB_ARG_MIN];
+		switch(slice) {
+			case(0):
+				slice = SCX_SLICE_DFL;
+				break;
+			case(1):
+				slice = SCX_SLICE_INF;
+				break;
+		}
 	} else {
 		DEBUG_PRINTK("fib_arg %d out of range [%d, %d], using default slice",
 					fib_arg, FIB_ARG_MIN, FIB_ARG_MAX);
