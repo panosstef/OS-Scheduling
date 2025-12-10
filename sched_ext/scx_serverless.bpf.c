@@ -302,13 +302,6 @@ int BPF_STRUCT_OPS(serverless_init_task, struct task_struct *p, struct scx_init_
 	return 0;
 }
 
-#ifdef DEBUG
-int BPF_STRUCT_OPS(serverless_exit_task, struct task_struct *p, struct scx_exit_task_args *args) {
-	DEBUG_PRINTK("%-30s exiting task %d", "[serverless_exit_task]", p->pid);
-	return 0;
-}
-#endif
-
 int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 	u64 slice;
 	DEBUG_PRINTK("%-30s enabling task %d", "[serverless_enable]", p->pid);
@@ -362,7 +355,6 @@ SCX_OPS_DEFINE(serverless_ops,
 		   .runnable		= (void *)serverless_runnable,
 		   .quiescent		= (void *)serverless_quiescent,
 		   .tick			= (void *)serverless_tick,
-			.exit_task		= (void *)serverless_exit_task,
 #endif
 		   .stopping		= (void *)serverless_stopping,
 		   .init_task		= (void *)serverless_init_task,
