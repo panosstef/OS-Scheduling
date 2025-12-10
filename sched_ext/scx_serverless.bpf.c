@@ -30,18 +30,18 @@ UEI_DEFINE(uei);
 //   - SCX_SLICE_DFL (0) for default slice
 //   - SCX_SLICE_INF (1) for infinite slice
 static const u64 fib_slice_map[] = {
-	1,       // fib 24 -> SCX_SLICE_DFL
-	1,       // fib 25 -> SCX_SLICE_DFL
-	1,       // fib 26 -> SCX_SLICE_DFL
-	1,       // fib 27 -> SCX_SLICE_DFL
-	1,       // fib 28 -> SCX_SLICE_DFL
-	1,       // fib 29 -> SCX_SLICE_DFL
-	1,       // fib 30 -> SCX_SLICE_DFL
-	1,       // fib 31 -> SCX_SLICE_DFL
-	1,       // fib 32 -> SCX_SLICE_DFL
-	1,       // fib 33 -> SCX_SLICE_DFL
-	1,       // fib 34 -> SCX_SLICE_DFL
-	1,       // fib 35 -> SCX_SLICE_DFL
+	1,       // fib 24 -> SCX_SLICE_INF
+	1,       // fib 25 -> SCX_SLICE_INF
+	1,       // fib 26 -> SCX_SLICE_INF
+	1,       // fib 27 -> SCX_SLICE_INF
+	1,       // fib 28 -> SCX_SLICE_INF
+	1,       // fib 29 -> SCX_SLICE_INF
+	1,       // fib 30 -> SCX_SLICE_INF
+	1,       // fib 31 -> SCX_SLICE_INF
+	1,       // fib 32 -> SCX_SLICE_INF
+	1,       // fib 33 -> SCX_SLICE_INF
+	1,       // fib 34 -> SCX_SLICE_INF
+	1,       // fib 35 -> SCX_SLICE_INF
 	0,       // fib 36 -> SCX_SLICE_DFL
 	0,       // fib 37 -> SCX_SLICE_DFL
 	0,       // fib 38 -> SCX_SLICE_DFL
@@ -209,6 +209,7 @@ s32 BPF_STRUCT_OPS(serverless_select_cpu, struct task_struct *p, s32 prev_cpu, u
 
 		DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, slice);
 		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, 0);
+		scx_bpf_kick_cpu(cpu, 0);
 	}
 	return cpu;
 }
@@ -236,6 +237,7 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 
 
 	scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, enq_flags);
+	scx_bpf_kick_cpu(scx_bpf_task_cpu(p), 0);
 	DEBUG_PRINTK("%-30s task %d enqueued ,ran_time %llu, task_slice %llu", "[serverless_enqueue]", p->pid, vtime, tctx->slice);
 
 	return 0;
