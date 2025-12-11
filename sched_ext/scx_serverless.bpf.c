@@ -165,6 +165,7 @@ static void enqueue_task_in_userspace(struct task_struct *p) {
 		if (time_before(vtime, vtime_now - SCX_SLICE_DFL))
 			vtime = vtime_now - SCX_SLICE_DFL;
 		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime, 0);
+		scx_bpf_kick_cpu(scx_bpf_task_cpu(p), 0);
 		return;
 	}
 
@@ -207,6 +208,7 @@ static void dequeue_tasks_from_userspace(void) {
 			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[dequeue_tasks_from_userspace]", p->pid);
 			// Don't have a task context, use default slice, also don't create one, other paths will just use the default slice
 			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
+			scx_bpf_kick_cpu(scx_bpf_task_cpu(p), 0);
 			bpf_task_release(p);
 			continue;
 		}
@@ -220,6 +222,7 @@ static void dequeue_tasks_from_userspace(void) {
 
 		tctx->slice = u_task.slice;
 		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
+		scx_bpf_kick_cpu(scx_bpf_task_cpu(p), 0);
 		DEBUG_PRINTK("%-30s task %d uspace --> k, task_slice %llu", "[dequeue_tasks_from_userspace]", p->pid, tctx->slice);
 		bpf_task_release(p);
 	}
@@ -262,15 +265,15 @@ s32 BPF_STRUCT_OPS(serverless_select_cpu, struct task_struct *p, s32 prev_cpu, u
 
 		if (!tctx) {
 			DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_select_cpu]", p->pid);
-			scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime, 0);
-			return cpu;
 		}
+
 		// Limit the amount of budget that an idling task can accumulate to one slice.
 		if (time_before(vtime, vtime_now - slice))
 			vtime = vtime_now - slice;
 
 		DEBUG_PRINTK("%-30s task %d waking up on idle CPU %d, enqueueing locally, task_slice %llu", "[serverless_select_cpu]", p->pid, cpu, slice);
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, tctx->slice, vtime, 0);
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, 0);
+		scx_bpf_kick_cpu(cpu, 0);
 	}
 	return cpu;
 }
@@ -295,13 +298,12 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 
 	if (!tctx) {
 		DEBUG_PRINTK("%-30s failed to get task ctx for task %d", "[serverless_enqueue]", p->pid);
-		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, SCX_SLICE_DFL, vtime_now, enq_flags);
-		return 0;
 	}
 
 
 
 	scx_bpf_dsq_insert_vtime(p, SHARED_DSQ_ID, slice, vtime, enq_flags);
+	scx_bpf_kick_cpu(scx_bpf_task_cpu(p), 0);
 	DEBUG_PRINTK("%-30s task %d enqueued ,ran_time %llu, task_slice %llu", "[serverless_enqueue]", p->pid, vtime, tctx->slice);
 
 	return 0;
