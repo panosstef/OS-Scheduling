@@ -30,7 +30,7 @@ def parse_event_from_line(line):
 	# Format: process-pid [cpu]timestamp: event_type: details
 	# e.g trace-cmd-3548  [000]  4896.102217: task_rename:          pid=3548 oldcomm=trace-cmd newcomm=exec_workload.p oom_score_adj=0
 	trace_pattern = re.compile(
-		r'(.+?)-(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+(\S+):\s+(.*)')
+		r'(.+?)-(\d+)\s+\[(\d+)\](?:.*?)?\s+(\d+\.\d+):\s+(\S+):\s+(.*)')
 
 	match = trace_pattern.match(line)
 	if match:
