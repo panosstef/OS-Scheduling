@@ -29,8 +29,10 @@ def parse_event_from_line(line):
 	# Regex pattern for parsing ftrace lines
 	# Format: process-pid [cpu]timestamp: event_type: details
 	# e.g trace-cmd-3548  [000]  4896.102217: task_rename:          pid=3548 oldcomm=trace-cmd newcomm=exec_workload.p oom_score_adj=0
+	# Version 3.3.1 of trace-cmd has extra task state flags so the regex should catch both versions
+	# Like so: trace-cmd-3548  [000]-0x1  4896.102217: task_rename:          pid=3548 oldcomm=trace-cmd newcomm=exec_workload.p oom_score_adj=0
 	trace_pattern = re.compile(
-		r'(.+?)-(\d+)\s+\[(\d+)\]\s+(\d+\.\d+):\s+(\S+):\s+(.*)')
+		r'(.+?)-(\d+)\s+\[(\d+)\](?:.*?)?\s+(\d+\.\d+):\s+(\S+):\s+(.*)')
 
 	match = trace_pattern.match(line)
 	if match:
