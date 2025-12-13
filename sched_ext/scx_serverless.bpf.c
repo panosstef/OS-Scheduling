@@ -309,6 +309,7 @@ int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 	if (create_task_ctx(p, slice) < 0) {
 		return -ENOMEM;
 	}
+	p->scx.slice = slice;
 
 	__sync_fetch_and_add(&nr_enabled, 1);
 	return 0;
