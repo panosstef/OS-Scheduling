@@ -1,0 +1,33 @@
+/root/loadgen/runners/tmp/schedext_50: 123.05 s
+Idle stats:
+    CPU  0 idle for 122837.176  msec  ( 99.56%)
+    CPU  1 idle for  62221.375  msec  ( 50.43%)
+    CPU  2 idle for  65385.759  msec  ( 52.99%)
+    CPU  3 idle for  62658.554  msec  ( 50.78%)
+    CPU  4 idle for  60460.849  msec  ( 49.00%)
+    CPU  5 idle for  57946.355  msec  ( 46.96%)
+    CPU  6 idle for  67797.699  msec  ( 54.95%)
+    CPU  7 idle for  72735.179  msec  ( 58.95%)
+    CPU  8 idle for  58416.375  msec  ( 47.34%)
+    CPU  9 idle for  45288.074  msec  ( 36.70%)
+    CPU 10 idle for  72540.129  msec  ( 58.79%)
+    CPU 11 idle for  60582.386  msec  ( 49.10%)
+    CPU 12 idle for  66890.428  msec  ( 54.21%)
+    CPU 13 idle for  66071.996  msec  ( 53.55%)
+    CPU 14 idle for  62232.254  msec  ( 50.44%)
+    CPU 15 idle for  65668.754  msec  ( 53.22%)
+    CPU 16 idle for  67039.837  msec  ( 54.33%)
+    CPU 17 idle for  64244.608  msec  ( 52.07%)
+    CPU 18 idle for  58443.503  msec  ( 47.37%)
+    CPU 19 idle for  63126.608  msec  ( 51.16%)
+    CPU 20 idle for  73923.123  msec  ( 59.91%)
+    CPU 21 idle for  58398.682  msec  ( 47.33%)
+    CPU 22 idle for  68467.313  msec  ( 55.49%)
+    CPU 23 idle for  65613.248  msec  ( 53.18%)
+
+    Total number of unique tasks: 2186
+Total number of context switches: 120402
+           Total run time (msec): 28320.576 
+    Total scheduling time (msec): 123384.501  (x 24)
+
+total_workload_size: 1757
