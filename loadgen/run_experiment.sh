@@ -88,6 +88,12 @@ if [[ -n "$SCHED_EXT_ARG" ]]; then
 	fi
 fi
 
+# For FIFO execution, remove kernel RT limits to allow RT tasks to run without throttling
+if [[ -n "$FIFO_ARG" ]]; then
+	echo "Setting kernel.sched_rt_runtime_us=-1 for FIFO execution..."
+	sysctl -w kernel.sched_rt_runtime_us=-1
+fi
+
 #Run the ftrace experiment and perf experiment
 ./run_experiment_ftrace.sh $FILENAME $FIFO_ARG $SCHED_EXT_ARG
 
