@@ -52,8 +52,13 @@ def analyze_data(*datasets):
 
 		for (df, label) in datasets:
 			data = np.sort(df[col].values)
+			if len(data) == 0:
+				continue
+			p99 = np.percentile(data, 99)
 			cdf = np.arange(1, len(data)+1) / len(data)
-			ax.plot(data, cdf, label=label)
+			lines = ax.plot(data, cdf, label=f"{label} (P99={p99:.2f})")
+			ax.axvline(x=p99, color=lines[0].get_color(), linestyle='--', alpha=0.5)
+			ax.text(p99, 0.05, f'{p99:.2f}', color=lines[0].get_color(), rotation=90, ha='right', va='bottom')
 
 		ax.set_title(f'CDF - {col.replace("_", " ").title()}')
 		ax.set_xlabel(xlabel)
@@ -67,6 +72,39 @@ def analyze_data(*datasets):
 	plt.savefig("figures/per_proc_times.png")
 	plt.close()
 	printc("Saved combined timing CDF plots as per_proc_times.png")
+
+
+def plot_end_to_end_times(*datasets):
+	plt.figure(figsize=(10, 6), dpi=300)
+
+	col = 'duration'
+	xlabel = 'End-to-End Time (s)'
+
+	for (df, label) in datasets:
+		if col not in df.columns:
+			continue
+
+		data = np.sort(df[col].values)
+		if len(data) == 0:
+			continue
+
+		p99 = np.percentile(data, 99)
+		cdf = np.arange(1, len(data)+1) / len(data)
+		lines = plt.plot(data, cdf, label=f"{label} (P99={p99:.2f})")
+		plt.axvline(x=p99, color=lines[0].get_color(), linestyle='--', alpha=0.5)
+		plt.text(p99, 0.05, f'{p99:.2f}', color=lines[0].get_color(), rotation=90, ha='right', va='bottom')
+
+	plt.title('CDF - End-to-End Time')
+	plt.xlabel(xlabel)
+	plt.ylabel('CDF')
+	plt.xscale('log')
+	plt.grid(True, alpha=0.3)
+	plt.legend()
+
+	plt.tight_layout()
+	plt.savefig("figures/per_proc_end_to_end_times.png")
+	plt.close()
+	printc("Saved end-to-end time CDF plot as per_proc_end_to_end_times.png")
 
 
 def main():
@@ -91,6 +129,7 @@ def main():
 
 	# Analyze the data
 	analyze_data(*datasets)
+	plot_end_to_end_times(*datasets)
 
 
 

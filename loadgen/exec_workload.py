@@ -3,6 +3,7 @@ import time
 import argparse
 import subprocess
 import threading
+import queue
 import os
 import utils.exec_utils as exec_utils
 from utils.cpu_monitoring import start_cpu_monitoring, stop_cpu_monitoring
@@ -12,45 +13,97 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 workload_file = os.path.join(script_dir, "dataset/workload_dur.txt")
 cpu_count = os.cpu_count()
 
-def launch_command(command, arg, results, index, request_time, preexec_fn=None):
-	try:
+# Thread-safe dictionary: { pid: (arg, request_time, index, Popen_object) }
+active_tasks = {}
 
-		os.sched_setaffinity(0, list(range(1, cpu_count)))
-		os.nice(15)
+# Event to signal when the main loop has finished dispatching all tasks
+dispatch_complete = threading.Event()
 
-		process = subprocess.Popen(
-			command + [arg],
-			stdout=subprocess.PIPE,
-			stderr=subprocess.PIPE,
-			preexec_fn= preexec_fn)
+def launcher_worker(task_queue, fifo, sched_ext):
+	base_cmd = [f"{script_dir}/payload/launch_function.out"]
+	if sched_ext:
+		base_cmd = [f"{script_dir}/payload/run_with_sched_ext"] + base_cmd
 
-		stdout, stderr = process.communicate()
-		return_time = time.time()
 
-		if process.returncode != 0:
-			print(f"Process for arg {arg} exited with code {process.returncode}")
-			if stderr:
-				print(f"Error: {stderr.decode().strip()}")
+	cpu_list = ",".join(str(c) for c in range(1, cpu_count))
 
-		results[index] = (stdout.decode().strip(), arg, request_time, return_time)
-	except Exception as e:
-		print(f"Exception in task for arg {arg}: {str(e)}")
-		results[index] = None
+	while True:
+		try:
+			item = task_queue.get(timeout=3)
+		except queue.Empty:
+			return
+
+		if item is None:
+			task_queue.task_done()
+			break
+
+		arg, index, request_time = item
+
+		try:
+			cmd = ["nice", "-n", "15", "taskset", "-c", cpu_list]
+			if fifo:
+				cmd.extend(["chrt", "-f", "50"])
+
+			full_cmd = cmd + base_cmd + [arg]
+
+			proc = subprocess.Popen(
+				full_cmd,
+				stdout=subprocess.PIPE,
+				stderr=subprocess.PIPE,
+				text=True
+			)
+			active_tasks[proc.pid] = (arg, request_time, index, proc)
+
+		except Exception as e:
+			print(f"Launcher Error: {e}")
+		finally:
+			task_queue.task_done()
+
+def reaper_thread(results, total_tasks):
+	reaped_count = 0
+
+	while reaped_count < total_tasks:
+		try:
+			# Block until a child process exits.
+			pid, status = os.wait()
+
+			task_info = active_tasks.pop(pid, None)
+
+			if task_info:
+				arg, request_time, index, proc = task_info
+
+				stdout = proc.stdout.read().strip()
+				proc.stdout.close()
+
+				# This introduces some jitter as it's not exactly when the process ended,
+				# but it's close enough for our purposes.
+				return_time = time.time()
+
+				if status != 0:
+					if os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0:
+						print(f"Process {arg} failed with {os.WEXITSTATUS(status)}")
+
+				results[index] = (stdout, arg, request_time, return_time)
+				reaped_count += 1
+			else:
+				print(f"Reaper Warning: Unknown PID {pid} reaped.")
+
+		except ChildProcessError:
+			# os.wait() throws this error if there are no running children.
+			# this might happen at the very start (before the first launcher fires)
+			# or if there is a massive gap in the workload.
+			# We sleep briefly to let the Launchers catch up.
+			time.sleep(0.001)
+			continue
+
+		except Exception as e:
+			print(f"Reaper Error: {e}")
+			break
 
 def main(outputfile, time_log=False, cpu_log=False, fifo=False, sched_ext=False, no_log=False):
-	os.sched_setaffinity(0, {0})  # Set CPU affinity to CPU 0
+	os.sched_setaffinity(0, {0})
 	os.nice(-15)
 	exec_utils.set_ulimit()
-
-	command = [f"{script_dir}/payload/launch_function.out"]
-
-	if fifo:
-		preexec_fn = lambda: os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(50))
-	elif sched_ext:
-		preexec_fn = None
-		command = [f"{script_dir}/payload/run_with_sched_ext"] + command
-	else:
-		preexec_fn = None
 
 	if cpu_log:
 		start_cpu_monitoring()
@@ -58,38 +111,76 @@ def main(outputfile, time_log=False, cpu_log=False, fifo=False, sched_ext=False,
 	with open(workload_file, "r") as f:
 		lines = f.readlines()
 
-	threads = []
+	workload = []
+	for i, line in enumerate(lines):
+		iat, arg = line.strip().split(" ")
+		workload.append((float(iat), str(arg), i))
+	workload.reverse()
+
 	results = [None] * len(lines)
-	iats_wargs = [(float(iat), str(arg)) for iat, arg in (line.strip().split(" ") for line in lines)]
-	iats_wargs.reverse()
+	task_queue = queue.Queue()
+
+	# Start reaper (collect finishing tasks)
+	reaper = threading.Thread(target=reaper_thread, args=(results, len(lines)))
+	reaper.start()
+
+	# Start launchers
+	num_launchers = 4
+	launchers = []
+	print(f"{Fore.GREEN}Starting simulation: 1 Reaper, {num_launchers} Launchers{Style.RESET_ALL}")
+
+	for _ in range(num_launchers):
+		t = threading.Thread(target=launcher_worker, args=(task_queue, fifo, sched_ext))
+		t.start()
+		launchers.append(t)
 
 	start_simulation = time.time()
 	next_request_time = start_simulation
-	print(f"{Fore.GREEN}Starting simulation{Style.RESET_ALL}")
+	total_tasks = len(lines)
+	dispatched = 0
 
-	for i in range(len(lines)):
-		IAT, arg = iats_wargs.pop()
+	get_time = time.time
+	sleep = time.sleep
+
+	# Main loop: dispatch tasks according to IATs
+	while dispatched < total_tasks:
+		IAT, arg, index = workload.pop()
 		next_request_time += IAT
 
-		# Sleep until it's time for the next request, accounting for overhead
-		current_time = time.time()
-		sleep_duration = next_request_time - current_time
+		now = get_time()
 
-		if sleep_duration > 0:
-			time.sleep(sleep_duration)
+		if now < next_request_time:
+			diff = next_request_time - now
 
-		t = threading.Thread(target=launch_command, args=(command, arg, results, i, next_request_time, preexec_fn))
-		t.start()
-		threads.append(t)
+			# Sleep in a hybrid manner to reduce CPU usage while maintaining timing accuracy
+			if diff > 0.002:
+				sleep(diff - 0.001)
 
-	print(f"{Fore.GREEN}Main loop finished after {time.time()-start_simulation}{Style.RESET_ALL}")
+			# If still time left, busy-wait
+			while get_time() < next_request_time:
+				pass
 
-	for t in threads:
+		task_queue.put((arg, index, next_request_time))
+		dispatched += 1
+
+	print(f"{Fore.GREEN}Main loop finished dispatching after {time.time()-start_simulation:.2f}s{Style.RESET_ALL}")
+
+	# Signal completion
+	dispatch_complete.set()
+
+	# Cleanup launchers
+	task_queue.join()
+	for _ in range(num_launchers):
+		task_queue.put(None)
+	for t in launchers:
 		t.join()
 
-	end_simulation = time.time()
+	print(f"{Fore.GREEN}Waiting for reaper to collect results...{Style.RESET_ALL}")
+	reaper.join()
 
-	print(f"{Fore.GREEN}Time elapsed: {end_simulation - start_simulation:.2f} s{Style.RESET_ALL}")
+	end_simulation = time.time()
+	print(f"{Fore.GREEN}Total time elapsed: {end_simulation - start_simulation:.2f} s{Style.RESET_ALL}")
+
 	if time_log:
 		exec_utils.log_total_time(outputfile, end_simulation - start_simulation)
 
@@ -97,9 +188,8 @@ def main(outputfile, time_log=False, cpu_log=False, fifo=False, sched_ext=False,
 
 	if not no_log:
 		exec_utils.log_tasks_output(results, outputfile)
-
-	# Debug write pids with arguments
-	exec_utils.debug_output_pids(results, outputfile)
+	else:
+		exec_utils.debug_output_pids(results, outputfile)
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
@@ -111,10 +201,7 @@ if __name__ == "__main__":
 	parser.add_argument("--no_log", action="store_true", help="Disable logging", default=False)
 	args = parser.parse_args()
 
-	if (args.fifo):
-		print(f"{Fore.GREEN}Using FIFO scheduling!{Style.RESET_ALL}")
-
-	if (args.sched_ext):
-		print(f"{Fore.GREEN}Using sched_ext scheduler!{Style.RESET_ALL}")
+	if (args.fifo): print(f"{Fore.GREEN}Using FIFO scheduling!{Style.RESET_ALL}")
+	if (args.sched_ext): print(f"{Fore.GREEN}Using sched_ext scheduler!{Style.RESET_ALL}")
 
 	main(args.outputfile, args.time_log, args.cpu_log, args.fifo, args.sched_ext, args.no_log)

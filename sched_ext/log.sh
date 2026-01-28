@@ -16,7 +16,7 @@ trap cleanup EXIT INT TERM
 # Read character by character and intercept Ctrl+L
 stty -icanon -echo
 cat /sys/kernel/debug/tracing/trace_pipe \
-    | awk '{$2=""; $3=""; sub(/bpf_trace_printk: /,""); print}' &
+    | stdbuf -oL awk '{$2=""; $3=""; sub(/bpf_trace_printk: /,""); print}' &
 
 # Monitor for Ctrl+L
 while true; do
