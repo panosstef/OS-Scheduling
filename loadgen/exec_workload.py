@@ -15,6 +15,7 @@ cpu_count = os.cpu_count()
 
 # Thread-safe dictionary: { pid: (arg, request_time, index, Popen_object) }
 active_tasks = {}
+tasks_lock = threading.Lock()
 
 # Event to signal when the main loop has finished dispatching all tasks
 dispatch_complete = threading.Event()
@@ -46,13 +47,14 @@ def launcher_worker(task_queue, fifo, sched_ext):
 
 			full_cmd = cmd + base_cmd + [arg]
 
-			proc = subprocess.Popen(
-				full_cmd,
-				stdout=subprocess.PIPE,
-				stderr=subprocess.PIPE,
-				text=True
-			)
-			active_tasks[proc.pid] = (arg, request_time, index, proc)
+			with tasks_lock:
+				proc = subprocess.Popen(
+					full_cmd,
+					stdout=subprocess.PIPE,
+					stderr=subprocess.PIPE,
+					text=True
+				)
+				active_tasks[proc.pid] = (arg, request_time, index, proc)
 
 		except Exception as e:
 			print(f"Launcher Error: {e}")
@@ -67,7 +69,9 @@ def reaper_thread(results, total_tasks):
 			# Block until a child process exits.
 			pid, status = os.wait()
 
-			task_info = active_tasks.pop(pid, None)
+			task_info = None
+			with tasks_lock:
+				task_info = active_tasks.pop(pid, None)
 
 			if task_info:
 				arg, request_time, index, proc = task_info

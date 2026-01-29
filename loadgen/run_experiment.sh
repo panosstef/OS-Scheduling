@@ -106,11 +106,3 @@ if [[ -z "$NO_LOG_ARG" ]]; then
 else
 	echo -e "\nSkipping rsync back to shared folder due to --no_log flag. Syncing tmp folder"
 fi
-
-#For debug purposes get the tmp folder
-sudo rsync -av --delete --no-owner --no-group ~/loadgen/runners/tmp /shared/loadgen
-
-
-#FOR FIFO EXECUTION REMOVE KERNEL RT LIMITS
-#or run a kernel with CONFIG_RT_GROUP_SCHED disabled
-#sysctl -w kernel.sched_rt_runtime_us=-1
