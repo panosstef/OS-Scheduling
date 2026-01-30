@@ -18,13 +18,13 @@ Total workload time (from the fork to the process exit), *thus response + execut
 
 #### Per process statistics (per_proc_statistics.png)
 
-*All these values are metrics on a per task basis (meaning one value for each one of the workoad tasks the simulation executes)*
+*All these values are metrics on a per task basis (meaning one value for each one of the workload tasks the simulation executes)*
 
 - **Total Runtime (ms)**:
   Time spent running on a CPU *(Cpu burst between sched-in and sched-out)*
 
 - **Contenct Switches**:
-  Number of scheduler switches after execution (after sched_exec for each worklaod task)
+  Number of scheduler switches after execution (after sched_exec for each workload task)
 
 - **Scheduling Delays [avg] (ms)**:
   Time a task was ready to run but was kept waiting (average and maximum values)

@@ -128,7 +128,7 @@ static void bootstrap(char *comm) {
 }
 
 static void sched_main_loop(void) {
-	while (!exit_req) {
+	while (!exit_req && !UEI_EXITED(skel, uei)) {
 		// Read statistics from BPF global variables
 		u64 enabled_count = skel->bss->nr_enabled;
 		u64 disabled_count = skel->bss->nr_disabled;

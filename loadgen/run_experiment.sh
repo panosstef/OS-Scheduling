@@ -88,6 +88,12 @@ if [[ -n "$SCHED_EXT_ARG" ]]; then
 	fi
 fi
 
+# For FIFO execution, remove kernel RT limits to allow RT tasks to run without throttling
+if [[ -n "$FIFO_ARG" ]]; then
+	echo "Setting kernel.sched_rt_runtime_us=-1 for FIFO execution..."
+	sysctl -w kernel.sched_rt_runtime_us=-1
+fi
+
 #Run the ftrace experiment and perf experiment
 ./run_experiment_ftrace.sh $FILENAME $FIFO_ARG $SCHED_EXT_ARG
 
@@ -100,11 +106,3 @@ if [[ -z "$NO_LOG_ARG" ]]; then
 else
 	echo -e "\nSkipping rsync back to shared folder due to --no_log flag. Syncing tmp folder"
 fi
-
-#For debug purposes get the tmp folder
-sudo rsync -av --delete --no-owner --no-group ~/loadgen/runners/tmp /shared/loadgen
-
-
-#FOR FIFO EXECUTION REMOVE KERNEL RT LIMITS
-#or run a kernel with CONFIG_RT_GROUP_SCHED disabled
-#sysctl -w kernel.sched_rt_runtime_us=-1
