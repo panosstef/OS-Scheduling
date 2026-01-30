@@ -1,0 +1,33 @@
+/root/loadgen/runners/tmp/cfs_80: 128.86 s
+Idle stats:
+    CPU  0 idle for 117720.911  msec  ( 91.07%)
+    CPU  1 idle for  50558.934  msec  ( 39.11%)
+    CPU  2 idle for  55444.742  msec  ( 42.89%)
+    CPU  3 idle for  65972.991  msec  ( 51.04%)
+    CPU  4 idle for  47930.294  msec  ( 37.08%)
+    CPU  5 idle for  35685.423  msec  ( 27.61%)
+    CPU  6 idle for  39113.412  msec  ( 30.26%)
+    CPU  7 idle for  48671.624  msec  ( 37.65%)
+    CPU  8 idle for  44761.524  msec  ( 34.63%)
+    CPU  9 idle for  28623.788  msec  ( 22.14%)
+    CPU 10 idle for  33205.471  msec  ( 25.69%)
+    CPU 11 idle for  43722.291  msec  ( 33.82%)
+    CPU 12 idle for  35960.047  msec  ( 27.82%)
+    CPU 13 idle for  45996.737  msec  ( 35.58%)
+    CPU 14 idle for  57091.834  msec  ( 44.17%)
+    CPU 15 idle for  42263.526  msec  ( 32.70%)
+    CPU 16 idle for  44646.353  msec  ( 34.54%)
+    CPU 17 idle for  34684.886  msec  ( 26.83%)
+    CPU 18 idle for  49222.360  msec  ( 38.08%)
+    CPU 19 idle for  50473.513  msec  ( 39.05%)
+    CPU 20 idle for  41002.455  msec  ( 31.72%)
+    CPU 21 idle for  44905.514  msec  ( 34.74%)
+    CPU 22 idle for  49279.019  msec  ( 38.12%)
+    CPU 23 idle for  28879.547  msec  ( 22.34%)
+
+    Total number of unique tasks: 2588
+Total number of context switches: 91352
+           Total run time (msec): 1966340.061 
+    Total scheduling time (msec): 129261.245  (x 24)
+
+total_workload_size: 2471

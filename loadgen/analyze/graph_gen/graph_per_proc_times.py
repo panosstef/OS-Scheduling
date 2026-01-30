@@ -56,7 +56,7 @@ def analyze_data(*datasets):
 				continue
 			p99 = np.percentile(data, 99)
 			cdf = np.arange(1, len(data)+1) / len(data)
-			lines = ax.plot(data, cdf, label=f"{label} (P99={p99:.2f})")
+			lines = ax.plot(data, cdf, marker='o', markersize=2, alpha=0.7, label=f"{label} (P99={p99:.2f})")
 			ax.axvline(x=p99, color=lines[0].get_color(), linestyle='--', alpha=0.5)
 			ax.text(p99, 0.05, f'{p99:.2f}', color=lines[0].get_color(), rotation=90, ha='right', va='bottom')
 
@@ -90,7 +90,7 @@ def plot_end_to_end_times(*datasets):
 
 		p99 = np.percentile(data, 99)
 		cdf = np.arange(1, len(data)+1) / len(data)
-		lines = plt.plot(data, cdf, label=f"{label} (P99={p99:.2f})")
+		lines = plt.plot(data, cdf, marker='o', markersize=1, alpha=0.7, label=f"{label} (P99={p99:.2f})")
 		plt.axvline(x=p99, color=lines[0].get_color(), linestyle='--', alpha=0.5)
 		plt.text(p99, 0.05, f'{p99:.2f}', color=lines[0].get_color(), rotation=90, ha='right', va='bottom')
 

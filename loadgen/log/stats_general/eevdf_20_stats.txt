@@ -1,0 +1,33 @@
+/root/loadgen/runners/tmp/eevdf_20: 121.23 s
+Idle stats:
+    CPU  0 idle for 118312.273  msec  ( 97.28%)
+    CPU  1 idle for  99555.684  msec  ( 81.85%)
+    CPU  2 idle for 102310.748  msec  ( 84.12%)
+    CPU  3 idle for  92066.063  msec  ( 75.70%)
+    CPU  4 idle for 101505.125  msec  ( 83.46%)
+    CPU  5 idle for 101413.674  msec  ( 83.38%)
+    CPU  6 idle for 102544.623  msec  ( 84.31%)
+    CPU  7 idle for  86625.764  msec  ( 71.22%)
+    CPU  8 idle for  97995.500  msec  ( 80.57%)
+    CPU  9 idle for  97641.234  msec  ( 80.28%)
+    CPU 10 idle for 108390.974  msec  ( 89.12%)
+    CPU 11 idle for 110967.504  msec  ( 91.24%)
+    CPU 12 idle for  95654.821  msec  ( 78.65%)
+    CPU 13 idle for 100905.229  msec  ( 82.96%)
+    CPU 14 idle for  83887.637  msec  ( 68.97%)
+    CPU 15 idle for 100348.014  msec  ( 82.51%)
+    CPU 16 idle for  95451.868  msec  ( 78.48%)
+    CPU 17 idle for 104894.030  msec  ( 86.24%)
+    CPU 18 idle for 100668.113  msec  ( 82.77%)
+    CPU 19 idle for 106277.454  msec  ( 87.38%)
+    CPU 20 idle for  99289.206  msec  ( 81.63%)
+    CPU 21 idle for  93046.250  msec  ( 76.50%)
+    CPU 22 idle for  81644.033  msec  ( 67.13%)
+    CPU 23 idle for  86506.695  msec  ( 71.13%)
+
+    Total number of unique tasks: 819
+Total number of context switches: 30092
+           Total run time (msec): 551001.744 
+    Total scheduling time (msec): 121625.836  (x 24)
+
+total_workload_size: 712

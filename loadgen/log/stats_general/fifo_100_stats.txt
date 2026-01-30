@@ -1,0 +1,33 @@
+/root/loadgen/runners/tmp/fifo_100: 152.13 s
+Idle stats:
+    CPU  0 idle for 128289.215  msec  ( 84.09%)
+    CPU  1 idle for  11989.854  msec  (  7.86%)
+    CPU  2 idle for  10413.058  msec  (  6.83%)
+    CPU  3 idle for  10929.284  msec  (  7.16%)
+    CPU  4 idle for  12443.357  msec  (  8.16%)
+    CPU  5 idle for   3682.512  msec  (  2.41%)
+    CPU  6 idle for  11262.779  msec  (  7.38%)
+    CPU  7 idle for  10528.579  msec  (  6.90%)
+    CPU  8 idle for   5969.890  msec  (  3.91%)
+    CPU  9 idle for  11337.394  msec  (  7.43%)
+    CPU 10 idle for  10358.046  msec  (  6.79%)
+    CPU 11 idle for  11402.970  msec  (  7.47%)
+    CPU 12 idle for  11877.817  msec  (  7.79%)
+    CPU 13 idle for  11056.596  msec  (  7.25%)
+    CPU 14 idle for  11279.766  msec  (  7.39%)
+    CPU 15 idle for  10801.382  msec  (  7.08%)
+    CPU 16 idle for   9816.508  msec  (  6.43%)
+    CPU 17 idle for  10258.024  msec  (  6.72%)
+    CPU 18 idle for   9148.056  msec  (  6.00%)
+    CPU 19 idle for  11538.191  msec  (  7.56%)
+    CPU 20 idle for  12054.982  msec  (  7.90%)
+    CPU 21 idle for   1176.601  msec  (  0.77%)
+    CPU 22 idle for   9338.006  msec  (  6.12%)
+    CPU 23 idle for   8948.159  msec  (  5.87%)
+
+    Total number of unique tasks: 4259
+Total number of context switches: 134377
+           Total run time (msec): 3305289.265 
+    Total scheduling time (msec): 152553.870  (x 24)
+
+total_workload_size: 4130
