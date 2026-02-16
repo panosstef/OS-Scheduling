@@ -35,19 +35,19 @@ for _, row in df.iterrows():
 
 
 # convert the dictionary to dataframe
-duration_occurance = pd.DataFrame.from_dict(duration_dict, orient="index")
-duration_occurance.index.name = "Duration"
-duration_occurance.reset_index(inplace=True)
+duration_occurrence = pd.DataFrame.from_dict(duration_dict, orient="index")
+duration_occurrence.index.name = "Duration"
+duration_occurrence.reset_index(inplace=True)
 
 bucket = {}
 for i in range(24, 47):
     bucket[i] = [0] * 2
 
 # According to calibration, function duration and the corresponding fib N's
-dur_list = [7, 8, 9, 10, 12, 14, 17, 21, 27, 39, 56, 85, 131, 205, 325, 520, 838, 839, 1347, 2175, 3512, 5673, 9172, 14835]
-fib = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 40, 41, 42, 43, 44, 45, 46]
+dur_list = [7, 8, 9, 10, 12, 14, 17, 21, 27, 39, 56, 85, 131, 205, 325, 520, 838, 1347, 2175, 3512, 5673, 9172, 14835]
+fib = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46]
 
-for index, row in duration_occurance.iterrows():
+for index, row in duration_occurrence.iterrows():
     Duration = list(row)[0]
     occur_list = list(row)[1:]
     for i in range(len(dur_list)):
@@ -85,5 +85,5 @@ for t in output_list:
     f.write(line + "\n")
 f.close()
 
-#Large 100, 700 medium, 1700 small
+#Large 300, 500, 700, 1700 small
 print (f"Workload generated with {len(output_list)} items, saved to {workload_file}")
