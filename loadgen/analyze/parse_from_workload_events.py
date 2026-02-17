@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# Used to manually parse the ftrace file to get the workload times.
+
 import sys
 import re
 import os
@@ -157,7 +160,7 @@ def workload_times_out(workload_times, output_file):
 
 def main():
 	if len(sys.argv) != 3:
-		print("Usage: python parse_trace.py <ftrace_file> <output_file>")
+		print("Usage: python parse_from_workload_events.py <ftrace_file> <output_file>")
 		sys.exit(1)
 	file_path = sys.argv[1]
 	output_file = sys.argv[2]
