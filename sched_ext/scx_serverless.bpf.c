@@ -329,7 +329,6 @@ int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 
 int BPF_STRUCT_OPS(serverless_disable, struct task_struct *p) {
 	DEBUG_PRINTK("%-30s disabling task %d", "[serverless_disable]", p->pid);
-	bpf_task_storage_delete(&task_ctx_stor, p);
 	__sync_fetch_and_add(&nr_disabled, 1);
 	return 0;
 }

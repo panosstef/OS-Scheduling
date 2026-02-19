@@ -1,33 +1,33 @@
-/root/loadgen/runners/tmp/schedext_100: 147.24 s
+/root/loadgen/runners/tmp/sched_ext_100_test_2: 147.47 s
 Idle stats:
-    CPU  0 idle for 130524.411  msec  ( 88.44%)
-    CPU  1 idle for   4799.243  msec  (  3.25%)
-    CPU  2 idle for   4746.647  msec  (  3.22%)
-    CPU  3 idle for   4668.335  msec  (  3.16%)
-    CPU  4 idle for   4716.093  msec  (  3.20%)
-    CPU  5 idle for   4724.261  msec  (  3.20%)
-    CPU  6 idle for   4768.118  msec  (  3.23%)
-    CPU  7 idle for   4769.149  msec  (  3.23%)
-    CPU  8 idle for   4890.002  msec  (  3.31%)
-    CPU  9 idle for   4737.081  msec  (  3.21%)
-    CPU 10 idle for   4719.657  msec  (  3.20%)
-    CPU 11 idle for   4555.972  msec  (  3.09%)
-    CPU 12 idle for   4730.196  msec  (  3.20%)
-    CPU 13 idle for   4751.384  msec  (  3.22%)
-    CPU 14 idle for   4846.344  msec  (  3.28%)
-    CPU 15 idle for   4869.301  msec  (  3.30%)
-    CPU 16 idle for   4778.601  msec  (  3.24%)
-    CPU 17 idle for   4854.012  msec  (  3.29%)
-    CPU 18 idle for   4759.846  msec  (  3.23%)
-    CPU 19 idle for   4807.160  msec  (  3.26%)
-    CPU 20 idle for   4881.967  msec  (  3.31%)
-    CPU 21 idle for   4849.659  msec  (  3.29%)
-    CPU 22 idle for   4778.606  msec  (  3.24%)
-    CPU 23 idle for   4873.330  msec  (  3.30%)
+    CPU  0 idle for 130763.263  msec  ( 88.46%)
+    CPU  1 idle for   4634.105  msec  (  3.13%)
+    CPU  2 idle for   4811.298  msec  (  3.25%)
+    CPU  3 idle for   4602.683  msec  (  3.11%)
+    CPU  4 idle for   4824.198  msec  (  3.26%)
+    CPU  5 idle for   4889.265  msec  (  3.31%)
+    CPU  6 idle for   4737.499  msec  (  3.20%)
+    CPU  7 idle for   4827.607  msec  (  3.27%)
+    CPU  8 idle for   4747.891  msec  (  3.21%)
+    CPU  9 idle for   4764.848  msec  (  3.22%)
+    CPU 10 idle for   4751.113  msec  (  3.21%)
+    CPU 11 idle for   4731.088  msec  (  3.20%)
+    CPU 12 idle for   4888.405  msec  (  3.31%)
+    CPU 13 idle for   4736.955  msec  (  3.20%)
+    CPU 14 idle for   4770.551  msec  (  3.23%)
+    CPU 15 idle for   4993.268  msec  (  3.38%)
+    CPU 16 idle for   4636.696  msec  (  3.14%)
+    CPU 17 idle for   4856.069  msec  (  3.29%)
+    CPU 18 idle for   4739.713  msec  (  3.21%)
+    CPU 19 idle for   4747.572  msec  (  3.21%)
+    CPU 20 idle for   4863.220  msec  (  3.29%)
+    CPU 21 idle for   4849.682  msec  (  3.28%)
+    CPU 22 idle for   4709.491  msec  (  3.19%)
+    CPU 23 idle for   4781.053  msec  (  3.23%)
 
-    Total number of unique tasks: 4242
-Total number of context switches: 101343
-           Total run time (msec): 61808.017 
-    Total scheduling time (msec): 147591.197  (x 24)
+    Total number of unique tasks: 4258
+Total number of context switches: 100180
+           Total run time (msec): 62196.522 
+    Total scheduling time (msec): 147822.061  (x 24)
 
 total_workload_size: 4130
