@@ -2,17 +2,25 @@
 
 Repo for code in thesis regarding OS schedulers (Linux - CFS - EEVDF). Main evaluation on serverless workloads. 
 
-This repository introduces `scx_serverless`, a custom scheduler built upon the `sched_ext` framework. The scheduler identifies and prioritizes short-lived FaaS tasks through a workload-aware policy, allowing them to run to completion with minimal interruptions (`/sched_ext`). 
+This repository introduces two variants of `scx_serverless`, a custom scheduler built upon the `sched_ext` framework. The scheduler identifies and prioritizes short-lived FaaS tasks through a workload-aware policy, allowing them to run to completion with minimal interruptions (`/sched_ext`). 
 
-To evaluate the scheduler under CPU contention, the repository includes a FaaS workload simulator and an automated benchmarking pipeline driven by `ftrace` and `perf` (`/loadgen`) .
+To evaluate the scheduler under CPU contention, the repository includes a FaaS workload simulator and an automated benchmarking pipeline driven by `ftrace` and `perf` (`/loadgen`).
 
 ## Repository Structure
 
 The codebase is divided into two primary domains: the eBPF scheduling logic and the FaaS benchmarking pipeline.
 
-### `sched_ext/` (Custom Scheduler)
-* **`scx_serverless.c`**: The userspace implementation of the `scx_serverless` scheduler. It loads the eBPF scheduler into the kernel, manages eBPF maps, and provides timeslices back to the kernel.
-* **`scx_serverless.bpf.c`**: The eBPF code containing the core logic for scheduling decisions via a collection of eBPF callbacks.
+### `sched_ext/` (Custom Schedulers)
+The scheduling logic is implemented in two variants to evaluate different kernel-userspace delegation architectures:
+
+#### 1. Kernel-Assigned Slice Variant (`scx_serverless`)
+* **`scx_serverless.c`**: The userspace component that loads the eBPF scheduler into the kernel, manages eBPF maps, and handles lifecycle events.
+* **`scx_serverless.bpf.c`**: The eBPF code containing the core logic for scheduling decisions. It synchronously extracts task arguments using `bpf_probe_read_user` directly in the kernel to assign execution timeslices, minimizing scheduling latency.
+
+#### 2. Userspace-Assigned Slice Variant (`scx_serverless_ask_userspace`)
+* **`scx_serverless_ask_userspace.c`**: The userspace scheduler component. It consumes FaaS task scheduling requests from the kernel via eBPF queues, asynchronously parses process arguments via the `/proc` filesystem, calculates the appropriate timeslice, and dispatches the decision back to the kernel in batches.
+* **`scx_serverless_ask_userspace.bpf.c`**: The eBPF kernel component. It intercepts new tasks, safely suspends their execution by withholding them from the Dispatch Queue (DSQ), and fully unblocks and routes them to an idle CPU only after the userspace daemon provides the calculated timeslice.
+* **`scx_serverless_ask_userspace.h`**: Shared definitions and IPC data structures (`scx_serverless_enqueued_task`, `scx_serverless_dispatched_task`) for the kernel-userspace BPF maps.
 
 ### `loadgen/` (Workload Simulator & Benchmarking)
 
