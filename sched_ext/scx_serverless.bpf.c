@@ -22,8 +22,6 @@ UEI_DEFINE(uei);
 #define FIB_ARG_MIN 24
 #define FIB_ARG_MAX 46
 #define MAX_CMDLINE_LEN 64
-#define MAX_ENQUEUED_TASKS 4096
-// #define SCX_SLICE_DFL 50000000ULL  // 50 ms in nanoseconds
 #define LAG_LIMIT SCX_SLICE_DFL
 
 // Slice mapping table: fib_arg -> slice in nanoseconds
@@ -231,8 +229,8 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 
 	s32 idle_cpu = scx_bpf_pick_idle_cpu(p->cpus_ptr, 0);
 	if (idle_cpu >= 0) {
-		// We found a sleeper! Wake them up.
-		// They will wake, run serverless_dispatch, find this task, and run it.
+		// found a sleeper, wake them up.
+		// they will wake, run serverless_dispatch, find this task, and run it.
 		scx_bpf_kick_cpu(idle_cpu, SCX_KICK_IDLE);
 	}
 	else {
@@ -244,12 +242,11 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
         // - If it is IDLE (sleeping): It WAKES UP to handle the backlog.
         s32 target = scx_bpf_task_cpu(p);
 
-        // Don't kick CPU 0 (Simulator)
+        // don't kick CPU 0 (simulator)
         if (target != 0) {
              scx_bpf_kick_cpu(target, SCX_KICK_IDLE);
         }
     }
-
 
 	return 0;
 }
@@ -295,10 +292,7 @@ void BPF_STRUCT_OPS(serverless_stopping, struct task_struct *p, bool runnable) {
 	tctx->last_sum_exec_runtime = p->se.sum_exec_runtime;
 
 	DEBUG_PRINTK("%-30s task %d stopping (runnable = %d), rem_slice %llu, task_slice %llu, sum_exec_runtime %llu, last_sum_exec_runtime %llu", "[serverless_stopping]", p->pid, runnable, p->scx.slice, tctx->slice, p->se.sum_exec_runtime, tctx->last_sum_exec_runtime);
-	// p->scx.dsq_vtime += delta_exec * 100 / p->scx.weight;
 	p->scx.dsq_vtime += delta_exec;
-
-
 }
 
 #ifdef DEBUG
