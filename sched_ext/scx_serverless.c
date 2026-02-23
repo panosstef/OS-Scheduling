@@ -123,6 +123,7 @@ static void bootstrap(char *comm) {
 		.sched_priority = sched_get_priority_max(SCHED_EXT),
 	};
 
+	// This is actually not required if the userspace component doesn't do anything schduling wise for the backend. If we received tasks and sent them back to the kernel, we would need to be scheduled deinitely by sched_ext to let the eBPF backend decided when we must run.
 	int err = syscall(__NR_sched_setscheduler, getpid(), SCHED_EXT, &sched_param);
 	SCX_BUG_ON(err, "Failed to set SCHED_EXT for usersched task");
 }

@@ -534,7 +534,7 @@ static void bootstrap(char *comm) {
 
 	printf("bootstrap: got enqueued_fd=%d, dispatched_fd=%d\n", enqueued_fd, dispatched_fd);
 
-	// SCX_BUG_ON(spawn_stats_thread(), "Failed to spawn stats thread");
+	SCX_BUG_ON(spawn_stats_thread(), "Failed to spawn stats thread");
 	rb = init_ring_buffer();
 
 #ifdef DEBUG_BUILD
@@ -568,7 +568,7 @@ void wait_for_work(struct ring_buffer *rb) {
 }
 
 static void sched_main_loop(void) {
-	while (!exit_req) {
+	while (!exit_req && !UEI_EXITED(skel, uei)) {
 		dprintf("[sched_main_loop]: running main loop\n");
 		if (verbose)
 			fflush(stdout);

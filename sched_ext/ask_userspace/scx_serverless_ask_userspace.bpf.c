@@ -63,7 +63,7 @@ struct {
 	__type(value, struct scx_serverless_dispatched_task);
 } dispatched SEC(".maps");
 
-/* Map holding file descriptor to wake up userspace scheduler */
+/* Map used to wake up userspace scheduler */
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1 << 20);   /* 1 MB buffer */
@@ -331,8 +331,6 @@ s32 BPF_STRUCT_OPS(serverless_enqueue, struct task_struct *p, u64 enq_flags) {
 	return 0;
 }
 
-
-
 int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
 	if (test_and_clear_usersched_needed()) {
 		dispatch_user_scheduler();
@@ -368,7 +366,7 @@ int BPF_STRUCT_OPS(serverless_dispatch, s32 cpu, struct task_struct *prev) {
 void BPF_STRUCT_OPS(serverless_update_idle, s32 cpu, bool idle) {
 	// DEBUG_PRINTK("%-30s cpu %d %s idle", "[serverless_update_idle]", cpu, idle?"entering":"exiting");
 	/*
-	 * Don't do anything if we exit from and idle state, a CPU owner will
+	 * Don't do anything if we exit from an idle state, a CPU owner will
 	 * be assigned in .running().
 	 */
 	if (!idle)
@@ -472,11 +470,12 @@ int BPF_STRUCT_OPS(serverless_enable, struct task_struct *p) {
 	return 0;
 }
 
+#ifdef DEBUG
 int BPF_STRUCT_OPS(serverless_disable, struct task_struct *p) {
 	DEBUG_PRINTK("%-30s disabling task %d", "[serverless_disable]", p->pid);
-	bpf_task_storage_delete(&task_ctx_stor, p);
 	return 0;
 }
+#endif
 
 s32 BPF_STRUCT_OPS_SLEEPABLE(serverless_init) {
 #ifdef DEBUG
@@ -509,11 +508,11 @@ SCX_OPS_DEFINE(serverless_ops,
 		   .runnable		= (void *)serverless_runnable,
 		   .quiescent		= (void *)serverless_quiescent,
 		   .tick			= (void *)serverless_tick,
+		   .disable			= (void *)serverless_disable,
 #endif
 		   .stopping		= (void *)serverless_stopping,
 		   .update_idle		= (void *)serverless_update_idle,
 		   .enable			= (void *)serverless_enable,
-		   .disable			= (void *)serverless_disable,
 		   .init			= (void *)serverless_init,
 		   .exit			= (void *)serverless_exit,
 		   .flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE | SCX_OPS_SWITCH_PARTIAL,
