@@ -152,15 +152,20 @@ def get_workload_times(workload_events, pids_wargs):
 			start_time = None
 			first_scheduled_time = None
 			exit_time = None
-			migrations = -1 #Don't count the migration from the affinity set
+
+			# Changed from -1 to 0. If no migration event fires (e.g. sys_enter_sched_setaffinity handles it),
+			# this prevents a bug where migrations end up as -1 in your dataset.
+			migrations = 0
 
 			for event in events:
 				if start_time is None and event.event_type == "sched_process_fork" and f"child_pid={pid}" in event.details:
 					start_time = event.timestamp
 					continue
 
+				# --- FIX APPLIED HERE ---
+				# Changed from sched_switch to sched_process_exec to capture exact execution start
 				if (start_time is not None and first_scheduled_time is None and
-						event.event_type == "sched_switch" and f"next_pid={pid}" in event.details):
+						event.event_type == "sched_process_exec" and f"pid={pid} " in event.details and "launch_function" in event.details):
 					first_scheduled_time = event.timestamp
 					continue
 
@@ -181,6 +186,7 @@ def get_workload_times(workload_events, pids_wargs):
 					f"{Fore.RED}{Style.BRIGHT}{start_time} {first_scheduled_time	} {exit_time}{Style.RESET_ALL}")
 				print(events)
 				exit(-1)
+
 			if start_time > exit_time or startup_latency > (exit_time - start_time):
 				print(
 					f"{Fore.RED}{Style.BRIGHT}Error: Invalid times for PID {pid}: {start_time} {startup_latency} {exit_time}{Style.RESET_ALL}")

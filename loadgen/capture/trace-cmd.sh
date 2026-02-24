@@ -55,16 +55,24 @@ SCHED_EVENTS=(
     # sched:sched_wakeup_new
     # sched:sched_wakeup
     # sched:sched_wait_task
-    #syscalls:sys_exit_execve
-    #syscalls:sys_enter_execve
+    syscalls:sys_exit_execve
+    syscalls:sys_enter_execve
     # sched:sched_stat_runtime
     # sched:sched_stat_blocked
     # sched:sched_stat_iowait
     # sched:sched_stat_sleep
     # sched:sched_stat_wait
     # task_newtask
-    # task_rename
+    task_rename
     # error_report
+    syscalls:sys_exit_sched_setattr
+    syscalls:sys_enter_sched_setattr
+    syscalls:sys_exit_sched_setparam
+    syscalls:sys_enter_sched_setparam
+    syscalls:sys_exit_sched_setscheduler
+    syscalls:sys_enter_sched_setscheduler
+    syscalls:sys_exit_sched_setaffinity
+    syscalls:sys_enter_sched_setaffinity
 )
 
 # Build event arguments correctly
