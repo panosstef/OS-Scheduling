@@ -19,6 +19,7 @@ UEI_DEFINE(uei);
 
 // Maximum amount of tasks enqueued/dispatched between kernel and user-space.
 #define MAX_ENQUEUED_TASKS 4096
+#define SCX_SLICE_DFL 100000000ULL // 100ms default slice for serverless tasks
 #define LAG_LIMIT SCX_SLICE_DFL
 
 const volatile s32 usersched_pid;

@@ -22,6 +22,7 @@ UEI_DEFINE(uei);
 #define FIB_ARG_MIN 24
 #define FIB_ARG_MAX 46
 #define MAX_CMDLINE_LEN 64
+#define SCX_SLICE_DFL 100000000ULL # 100ms default slice for serverless tasks
 #define LAG_LIMIT SCX_SLICE_DFL
 
 // Slice mapping table: fib_arg -> slice in nanoseconds
