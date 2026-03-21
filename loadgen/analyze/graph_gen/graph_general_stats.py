@@ -3,11 +3,42 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import glob
+import fnmatch
 import sys
 import os
 import re
 
 from colorama import Fore, Style
+
+plt.rcParams.update({
+	'font.size': 14,
+	'axes.titlesize': 16,
+	'axes.labelsize': 14,
+	'xtick.labelsize': 12,
+	'ytick.labelsize': 12,
+	'legend.fontsize': 12,
+	'legend.title_fontsize': 13,
+})
+
+
+SCHEDULER_NAMES = {
+	'schedext_user': 'sched_ext (Userspace)',
+	'schedext': 'sched_ext',
+	'cfs': 'CFS',
+	'eevdf': 'EEVDF',
+	'fifo': 'FIFO',
+}
+
+
+def format_label(file_path):
+	"""Convert a raw filename into a thesis-quality label."""
+	name = os.path.splitext(os.path.basename(file_path))[0]
+	match = re.search(r'(schedext_user|schedext|cfs|eevdf|fifo)_(\d+)', name)
+	if match:
+		sched, load = match.group(1), match.group(2)
+		return f"{SCHEDULER_NAMES.get(sched, sched)} ({load}% load)"
+	return name
 
 
 def printc(*args, color=Fore.CYAN, **kwargs):
@@ -22,10 +53,10 @@ def load_data(file_path):
 	try:
 		with open(file_path, 'r') as f:
 			content = f.read()
-		return content, os.path.basename(file_path)
+		return content, format_label(file_path)
 	except Exception as e:
 		print(f"Error loading {file_path}: {e}")
-		return None, os.path.basename(file_path)
+		return None, format_label(file_path)
 
 
 def parse_general_stats(content):
@@ -200,13 +231,29 @@ def analyze_general_stats_data(*datasets, show_individual_cpu=False):
 def main():
 	parser = argparse.ArgumentParser(
 		description='Process general stats text files and generate comparison plots.')
-	parser.add_argument('files', nargs='+', help='Paths to text files to process')
+	parser.add_argument('files', nargs='+', help='Paths or glob patterns to text files to process')
+	parser.add_argument('--exclude', nargs='+', default=[], metavar='PATTERN',
+						help='Glob patterns to exclude (matched against filename, e.g. "*fifo*" "*100*")')
 	parser.add_argument('--indiv_cpu', action='store_true',
 						help='Generate separate individual CPU idle times plot')
 	args = parser.parse_args()
 
+	files = []
+	for pattern in args.files:
+		matched = glob.glob(pattern, recursive=True)
+		if matched:
+			files.extend(sorted(matched))
+		else:
+			printr(f"No files matched pattern: {pattern}")
+
+	if args.exclude:
+		before = len(files)
+		files = [f for f in files
+				 if not any(fnmatch.fnmatch(os.path.basename(f), exc) for exc in args.exclude)]
+		printc(f"Excluded {before - len(files)} file(s) via --exclude patterns.")
+
 	datasets = []
-	for file_path in args.files:
+	for file_path in files:
 		content, name = load_data(file_path)
 		if content is not None:
 			stats = parse_general_stats(content)

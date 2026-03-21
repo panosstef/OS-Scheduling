@@ -3,10 +3,42 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import glob
+import fnmatch
 import sys
 import os
+import re
 
 from colorama import Fore, Style
+
+plt.rcParams.update({
+	'font.size': 14,
+	'axes.titlesize': 16,
+	'axes.labelsize': 14,
+	'xtick.labelsize': 12,
+	'ytick.labelsize': 12,
+	'legend.fontsize': 12,
+	'legend.title_fontsize': 13,
+})
+
+
+SCHEDULER_NAMES = {
+	'schedext_user': 'sched_ext (Userspace)',
+	'schedext': 'sched_ext',
+	'cfs': 'CFS',
+	'eevdf': 'EEVDF',
+	'fifo': 'FIFO',
+}
+
+
+def format_label(file_path):
+	"""Convert a raw filename into a thesis-quality label."""
+	name = os.path.splitext(os.path.basename(file_path))[0]
+	match = re.search(r'(schedext_user|schedext|cfs|eevdf|fifo)_(\d+)', name)
+	if match:
+		sched, load = match.group(1), match.group(2)
+		return f"{SCHEDULER_NAMES.get(sched, sched)} ({load}% load)"
+	return name
 
 
 def printc(*args, color=Fore.CYAN, **kwargs):
@@ -20,10 +52,10 @@ def printr(*args, color=Fore.RED, **kwargs):
 def load_data(file_path):
 	try:
 		data = pd.read_csv(file_path)
-		return data, os.path.basename(file_path)
+		return data, format_label(file_path)
 	except Exception as e:
 		print(f"Error loading {file_path}: {e}")
-		return None, os.path.basename(file_path)
+		return None, format_label(file_path)
 
 
 def process_cpu_util_data(df):
@@ -72,10 +104,11 @@ def analyze_cpu_util_data(*datasets):
 
 		for i, (df, cpu_cols, label) in enumerate(datasets):
 			heatmap_data = df[cpu_cols].T
+			avg_util = df['avg_cpu_util'].mean()
 
 			im = axes[i].imshow(heatmap_data, aspect='auto', cmap='RdYlBu_r', vmin=0, vmax=100)
 			cbar = plt.colorbar(im, ax=axes[i], label='CPU Utilization (%)')
-			axes[i].set_title(f'CPU Utilization Heatmap - {label}')
+			axes[i].set_title(f'CPU Utilization Heatmap - {label} (Avg {avg_util:.2f}%)')
 			axes[i].set_xlabel('Time (s)')
 			axes[i].set_ylabel('CPU Core')
 
@@ -92,7 +125,7 @@ def analyze_cpu_util_data(*datasets):
 			axes[i].set_yticklabels(cpu_numbers)
 
 		plt.tight_layout()
-		plt.savefig("figures/heatmap_cpu_utilization.png")
+		plt.savefig("figures/heatmap_cpu_utilization.png", bbox_inches='tight')
 		plt.close()
 		printr("Saved all heatmaps as heatmap_cpu_utilization.png")
 
@@ -111,12 +144,28 @@ def analyze_cpu_util_data(*datasets):
 def main():
 	parser = argparse.ArgumentParser(
 		description='Process CSV CPU utilization data files and generate utilization plots.')
-	parser.add_argument('files', nargs='+', help='Paths to CSV files to process')
+	parser.add_argument('files', nargs='+', help='Paths or glob patterns to CSV files to process')
+	parser.add_argument('--exclude', nargs='+', default=[], metavar='PATTERN',
+						help='Glob patterns to exclude (matched against filename, e.g. "*fifo*" "*100*")')
 	args = parser.parse_args()
 	pd.set_option('display.float_format', '{:.2f}'.format)
 
+	files = []
+	for pattern in args.files:
+		matched = glob.glob(pattern, recursive=True)
+		if matched:
+			files.extend(sorted(matched))
+		else:
+			printr(f"No files matched pattern: {pattern}")
+
+	if args.exclude:
+		before = len(files)
+		files = [f for f in files
+				 if not any(fnmatch.fnmatch(os.path.basename(f), exc) for exc in args.exclude)]
+		printc(f"Excluded {before - len(files)} file(s) via --exclude patterns.")
+
 	datasets = []
-	for file_path in args.files:
+	for file_path in files:
 		df, name = load_data(file_path)
 		if df is not None:
 			df, cpu_cols = process_cpu_util_data(df)
